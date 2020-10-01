@@ -8,7 +8,7 @@ import numpy as np
 from copy import deepcopy
 
 from .nexus_scan import Scan, MultiScans
-from .functions_nexus import scanfile2number
+from .functions_nexus import scanfile2number, hdf_data
 
 
 class Beamline:
@@ -212,16 +212,36 @@ class Experiment(Beamline):
             print('Scan does not exist: %s' % filename)
             return None
 
+    def scandata(self, scan_numbers, address):
+        """
+        Fast return of data from scan number(s)
+        :param scan_numbers: int or list : scan numbers to get data
+        :param address: str : hdf5 address
+        :return: data
+        """
+        scan_numbers = np.asarray(scan_numbers).reshape(-1)
+        out = []
+        for scan in scan_numbers:
+            out += [hdf_data(self.getfile(scan), address)]
+        if len(scan_numbers) == 1:
+            return out[0]
+        return out
+
     def printscan(self, scan_number=0, filename=None):
         scan = self.loadscan(scan_number, filename)
         print(scan)
 
-    def loadscans(self, scan_numbers):
+    def loadscans(self, scan_numbers, variable=None):
         """
         Return multi-scan object
         """
+        scan_numbers = np.asarray(scan_numbers).reshape(-1)
         scanlist = [self.loadscan(scan) for scan in scan_numbers]
-        return MultiScans([scan for scan in scanlist if scan])
+        return MultiScans([scan for scan in scanlist if scan], variable)
+
+    def printscans(self, scan_numbers, name=None):
+        """print data for each scan"""
+        print(self.loadscans(scan_numbers, name).info())
 
 
 class ExperimentScan(Scan):

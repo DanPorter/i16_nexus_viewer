@@ -1012,3 +1012,11 @@ def map2grid(grid, points, values, widths=None, background=0):
 def whererun():
     """Returns the location where python was run"""
     return os.path.abspath('.')
+
+
+def lastlines(filename, lines=1, max_line_length=255):
+    """Returns the last n lines of a text file"""
+    with open(filename, 'rb') as f:
+        f.seek(-(lines+1)*max_line_length, os.SEEK_END)
+        endlines = f.read().decode().split('\n')
+    return endlines[-lines:]

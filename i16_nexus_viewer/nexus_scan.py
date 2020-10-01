@@ -117,6 +117,15 @@ class Scan(Hdf5Nexus):
             self.yaxis()
         return eval(source, self._namespace)
 
+    def getvalue(self, source):
+        """Return the actual value, rather than dataset"""
+        value = self.__call__(source)
+        if ',' in source:
+            value = tuple(val[()] for val in value)
+        elif isinstance(value, h5py.Dataset):
+            value = value[()]
+        return value
+
     def __repr__(self):
         return "Scan('%s')" % self.filename
 
@@ -136,6 +145,12 @@ class Scan(Hdf5Nexus):
         out_str += '-String values-\n'
         for name, value in self._string_items.items():
             out_str += fmt % (name, value)
+        return out_str
+
+    def info(self):
+        """Return longer string with full config attributres"""
+        fmt = '%20s : %s\n'
+        out_str = self.__str__()
         out_str += '-Arrays-\n'
         for name, value in self._array_items.items():
             out_str += fmt % (name, array_str(value[:]))
@@ -143,6 +158,13 @@ class Scan(Hdf5Nexus):
         for name, value in self._value_items.items():
             out_str += fmt % (name, value)
         return out_str
+
+    def info_line(self, name=None):
+        """Return single line string with scan details"""
+        out = '%d axes=%s, signal=%s' % (self.scan_number, self.xaxis().basename, self.yaxis().basename)
+        if name is not None:
+            out += ', %s=%s' % (name, self.getvalue(name))
+        return out
 
     def __add__(self, addee):
         """
@@ -160,7 +182,7 @@ class Scan(Hdf5Nexus):
             out += '%30s : %r\n' % (item, value)
         return out
 
-    def _add2namespace(self, data_dict):
+    def add2namespace(self, data_dict):
         """
         Add additional parameters to scan namespace
         :param data_dict: dict
@@ -192,7 +214,7 @@ class Scan(Hdf5Nexus):
         # add to namespace
         data_dict = {'xaxis': dataset,
                      'axes': dataset}
-        self._add2namespace(data_dict)
+        self.add2namespace(data_dict)
         return dataset
 
     def yaxis(self, name=None, address=None):
@@ -219,7 +241,7 @@ class Scan(Hdf5Nexus):
         # add to namespace
         data_dict = {'yaxis': dataset,
                      'signal': dataset}
-        self._add2namespace(data_dict)
+        self.add2namespace(data_dict)
         return dataset
 
     def dataframe(self):
@@ -417,7 +439,7 @@ class Scan(Hdf5Nexus):
             ename = 'stderr_' + pname
             fit_dict[pname] = param.value
             fit_dict[ename] = param.stderr
-            self._add2namespace(fit_dict)
+            self.add2namespace(fit_dict)
 
         if print_result:
             print(self.scan_title())
@@ -490,8 +512,7 @@ class MultiScans:
             return '\n'.join('%d' % scn for scn in self.scan_numbers)
         elif name is None:
             name = self._variable
-        values = self.__call__(name)
-        return '\n'.join('%d : %s=%s' % (scn, name, val) for scn, val in zip(self.scan_numbers, values))
+        return '\n'.join(scan.info_line(name) for scan in self._scans)
 
     def create_array(self, name):
         """Return numerical array from values"""

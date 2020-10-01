@@ -65,6 +65,16 @@ def scanfile2number(filename):
     return np.abs(np.int(os.path.split(filename)[-1][-10:-4]))
 
 
+def hdf_dataset(filename, address):
+    """Return dataset from a hdf file at given address"""
+    return h5py.File(filename, 'r').get(address)
+
+
+def hdf_data(filename, address):
+    """Return array data from a hdf file at given address"""
+    return h5py.File(filename, 'r').get(address)[()]
+
+
 def hdf_tree(hdf_group):
     """
     Return str of the full tree of data in a hdf object
@@ -135,6 +145,24 @@ def find_name(hdf_group, name, match_case=False, whole_word=False):
         elif not whole_word and name in address:
             out += [hdf_group.get(address).name]
     return out
+
+
+def find_nxclass(hdf_group, nxclass='NX_detector'):
+    """
+    Returns location of hdf group with attribute ['NX_class']== nxclass
+    :param hdf_group: hdf5 File or Group object
+    :param nxclass: str
+    :return: str hdf address
+    """
+    if 'NX_class' in hdf_group.attrs and hdf_group.attrs['NX_class'] == nxclass.encode():
+        return hdf_group.name
+    try:
+        for branch in hdf_group.keys():
+            address = find_nxclass(hdf_group.get(branch), nxclass)
+            if address:
+                return address
+    except AttributeError:
+        pass
 
 
 def find_attr(hdf_group, attr='axes'):
@@ -286,6 +314,17 @@ class Hdf5Nexus(h5py.File):
     def __init__(self, filename, mode='r', *args, **kwargs):
         super().__init__(filename, mode, *args, **kwargs)
 
+    def nx_reload(self):
+        """Closes the hdf file and re-opens"""
+        filename = self.filename
+        self.close()
+        self.__init__(filename)
+
+    def nx_refresh(self, dataset_address):
+        """Refresh dataset"""
+        dataset = self.get(dataset_address)
+        dataset.refresh()
+
     def nx_dataset_addresses(self):
         return dataset_addresses(self.get('/'))
 
@@ -299,6 +338,10 @@ class Hdf5Nexus(h5py.File):
     def nx_find_attr(self, attr='axes'):
         """Returns location of hdf attribute "axes" """
         return find_attr(self, attr)
+
+    def nx_find_nxclass(self, nxclass='NXdetector'):
+        """Returns location of hdf group with attr['NX_class']==nxclass"""
+        return find_nxclass(self, nxclass)
 
     def nx_find_image(self, address='/', multiple=False):
         """Return address of image data"""

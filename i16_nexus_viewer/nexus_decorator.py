@@ -55,7 +55,9 @@ class DatasetPlus(Dataset):
         self.address = dataset_address
         self.basename = os.path.basename(dataset_address)
         dataset = hdf5_obj.get(dataset_address)
-        super(DatasetPlus, self).__init__(dataset.id)
+        super().__init__(dataset.id)
 
     def value(self):
+        dataset = self.File.get(self.address)
+        dataset.refresh()
         return self.File.get(self.address)[()]
