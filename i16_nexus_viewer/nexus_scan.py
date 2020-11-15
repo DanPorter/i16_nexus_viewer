@@ -60,7 +60,7 @@ class Scan(Hdf5Nexus):
     _error_names = [('sum', 'roi2_sum', 'roi1_sum')]
     _error_functions = ['np.sqrt(%s+1)']
     _duplicate_namespace_names = {
-        'en': 'energy', # old, new
+        'en': 'energy',  # old, new
         'Ta': 'temp',
     }
 

@@ -59,5 +59,5 @@ class DatasetPlus(Dataset):
 
     def value(self):
         dataset = self.File.get(self.address)
-        dataset.refresh()
+        #dataset.refresh()
         return self.File.get(self.address)[()]
