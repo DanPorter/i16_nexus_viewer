@@ -8,7 +8,8 @@ import numpy as np
 from copy import deepcopy
 
 from .nexus_scan import Scan, MultiScans
-from .functions_nexus import scanfile2number, hdf_data
+from .functions_nexus import scanfile2number
+from .nexus_loader import hdf_data
 
 
 class Beamline:
