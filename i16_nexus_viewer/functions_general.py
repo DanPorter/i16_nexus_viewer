@@ -9,8 +9,8 @@ By Dan Porter, PhD
 Diamond
 2018
 
-Version 1.8
-Last updated: 20/07/20
+Version 1.8.1
+Last updated: 01/12/20
 
 Version History:
 06/01/18 1.0    Program created from DansGeneralProgs.py V2.3
@@ -22,6 +22,7 @@ Version History:
 05/05/20 1.6    New version of readstfm, allows E powers and handles non-numbers.
 12/05/20 1.7    Added sph2cart, replace_bracket_multiple
 20/07/20 1.8    Added vector_inersection and plane_intersection, updated findranges, added whererun
+01/12/20 1.8.1  Added get_methods function
 
 @author: DGPorter
 """
@@ -29,7 +30,7 @@ Version History:
 import sys, os, re
 import numpy as np
 
-__version__ = '1.8'
+__version__ = '1.8.1'
 
 # File directory
 directory = os.path.abspath(os.path.dirname(__file__))
@@ -1020,3 +1021,11 @@ def lastlines(filename, lines=1, max_line_length=255):
         f.seek(-(lines+1)*max_line_length, os.SEEK_END)
         endlines = f.read().decode().split('\n')
     return endlines[-lines:]
+
+
+def get_methods(object, include_special=True):
+    """Returns a list of methods (functions) within object"""
+    if include_special:
+        return [method_name for method_name in dir(object) if callable(getattr(object, method_name))]
+    return [method_name for method_name in dir(object) if callable(getattr(object, method_name)) and '__' not in method_name]
+

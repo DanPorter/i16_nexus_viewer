@@ -56,7 +56,15 @@ from imageio import imread  # read Tiff images
 BYTES_DECODER = 'utf-8'
 VALUE_FORMAT = '%.5g'
 DATE_FORMAT = "%Y-%m-%dT%H:%M:%S.%f%z"
-OUTPUT_FORMAT = '%20s = %s\n'
+OUTPUT_FORMAT = '%20s = %s'
+TITLE_COMMAND = '#{entry_identifier} {title}'
+LABEL_COMMAND = '#{entry_identifier}'
+
+FIG_SIZE = [12, 10]
+FIG_DPI = 60
+
+
+"---------------------------BASIC FUNCTIONS---------------------------------"
 
 
 def scanfile2number(filename):
@@ -87,6 +95,14 @@ def array_str(array):
     return out_str % (shape, amax, amin, amean)
 
 
+def address_name(address):
+    """Convert hdf address to name"""
+    return os.path.basename(address)
+
+
+"----------------------------LOAD FUNCTIONS---------------------------------"
+
+
 def load(filename):
     """Load a hdf5 or nexus file"""
     return h5py.File(filename, 'r')
@@ -98,13 +114,22 @@ def reload(hdf):
     return load(filename)
 
 
-def address_name(address):
-    """Convert hdf address to name"""
-    return os.path.basename(address)
+"--------------------------DATASET FUNCTIONS--------------------------------"
+
+
+def dataset_name(dataset):
+    """
+    Return name of the dataset
+    the name is the final part of the hdf dataset address
+    equivalent to:
+      dataset_name = dataset.name.split('/')[-1]
+    Warning - dataset.name is not always stored as the correct value
+    """
+    return address_name(dataset.name)
 
 
 def dataset_data(dataset):
-    """Get data from dataset"""
+    """Get data from dataset, return float, array or str"""
     data = np.asarray(dataset[()]).reshape(-1)
     if len(data) == 1: data = data[0]
     # Handle bytes strings to return string
@@ -145,6 +170,7 @@ def dataset_datetime(dataset, input_format=None, output_format=None):
     :param dataset: hdf dataset
     :param input_format: str datetime.strptime format specifier to parse dataset
     :param output_format: str datetime.strftime format specifier to generate output string (if None, returns datetime)
+    :return datetime or list of datetime
     """
     if input_format is None:
         input_format = DATE_FORMAT
@@ -157,68 +183,18 @@ def dataset_datetime(dataset, input_format=None, output_format=None):
         # float timestamp passed, e.g. TimeFromEpoch: 1603355594.96
         dates = np.array([datetime.datetime.fromtimestamp(float(time)) for time in data])
 
-    if output_format is None:
+    if output_format:
+        if len(data) == 1:
+            return dates[0].strftime(output_format)
+        else:
+            return [date.strftime(output_format) for date in dates]
+    else:
         if len(data) == 1:
             return dates[0]
         return dates
-    if len(data) == 1:
-        return dates[0].strftime(output_format)
-    return [date.strftime(output_format) for date in dates]
 
 
-def data_strings(hdf_group, addresses, output_format=None):
-    """
-    Return strings of data using output_format
-    :param hdf_group: hdf5 File or Group object
-    :param addresses: list of str or str hdf dataset addresses
-    :param output_format: str
-    :return: str
-    """
-    addresses = np.asarray(addresses, dtype=str).reshape(-1)
-    if output_format is None:
-        output_format = OUTPUT_FORMAT
-    out_str = ''
-    for address in addresses:
-        name = address_name(address)
-        dataset = hdf_group.get(address)
-        if dataset:
-            data_str = dataset_string(dataset)
-        else:
-            data_str = 'Not available'
-        out_str += output_format % (name, data_str)
-    return out_str
-
-
-def tree(hdf_group, recursion_limit=100):
-    """
-    Return str of the full tree of data in a hdf object
-    :param hdf_group: hdf5 File or Group object
-    :param recursion_limit: int max number of levels
-    :return:
-    """
-    if recursion_limit < 1: return ''
-    outstr = '\nGroup: %s\n' % hdf_group.name
-    for attr, val in hdf_group.attrs.items():
-        outstr += '  attr: %s: %s\n' % (attr, val)
-    try:
-        for branch in hdf_group.keys():
-            outstr += tree(hdf_group.get(branch), recursion_limit-1)
-        return outstr
-    except AttributeError:
-        name = os.path.basename(hdf_group.name)
-        out = '  dataset: %s\n    %s, size: %s, shape: %s\n' % (name, hdf_group.name, hdf_group.size, hdf_group.shape)
-        out += '    attrs: %s\n' % ','.join(hdf_group.attrs.keys())
-        if len(hdf_group.shape) == 1 and hdf_group.size > 1:
-            out += '    data: [%s ...%s... %s]\n' % (hdf_group[0], hdf_group.size, hdf_group[-1])
-        elif len(hdf_group.shape) > 1:
-            shape = hdf_group.shape
-            amax = np.max(hdf_group)
-            amin = np.min(hdf_group)
-            mean = np.mean(hdf_group)
-            out += '    data: %s, max: %.3g, min: %.3g, mean: %.3g\n' % (shape, amax, amin, mean)
-        else:
-            out += '    data: %s\n' % hdf_group[()]
-        return out
+"-------------------------HDF ADDRESS FUNCTIONS-------------------------------"
 
 
 def dataset_addresses(hdf_group, addresses='/', recursion_limit=100):
@@ -234,23 +210,10 @@ def dataset_addresses(hdf_group, addresses='/', recursion_limit=100):
     for address in addresses:
         data = hdf_group.get(address)
         if data and type(data) is h5py.Dataset:
-            out += [data.name]
+            out += [address]
         elif data and recursion_limit > 0:
-            new_addresses = [data.get(d).name for d in data.keys()]
+            new_addresses = ['/'.join([address, d]).replace('//', '/') for d in data.keys()]
             out += dataset_addresses(hdf_group, new_addresses, recursion_limit-1)
-    return out
-
-
-def hdf_addresses(filename, addresses='/', recursion_limit=100):
-    """
-    Return list of addresses of datasets, starting at each address
-    :param filename: filename of hdf5 File
-    :param addresses: list of str or str : start in this / these addresses
-    :param recursion_limit: Limit on recursivley checking lower groups
-    :return: list of str
-    """
-    with h5py.File(filename, 'r') as hdf_group:
-        out = dataset_addresses(hdf_group, addresses, recursion_limit)
     return out
 
 
@@ -274,6 +237,143 @@ def find_name(hdf_group, name, match_case=False, whole_word=False):
         elif not whole_word and name in a_name:
             out += [hdf_group.get(address).name]
     return out
+
+
+"----------------------ADDRESS DATASET FUNCTIONS------------------------------"
+
+
+def get_datasets(hdf_group, names):
+    """
+    Return datasets using data names, names can be addresses or simpler, where find will be used
+    :param hdf_group: hdf5 File or Group object
+    :param names: str or list of str of dataset names or addresses
+    :return: hdf dataset or list of datasets
+    """
+    names = np.asarray(names, dtype=str).reshape(-1)
+    out = []
+    for name in names:
+        dataset = hdf_group.get(name)
+        if dataset:
+            out += [dataset]
+        else:
+            addresses = find_name(hdf_group, name, whole_word=True, match_case=True)
+            if len(addresses) == 0:
+                addresses = find_name(hdf_group, name, whole_word=True, match_case=False)
+            if len(addresses) == 0:
+                addresses = find_name(hdf_group, name, whole_word=False, match_case=False)
+            if len(addresses) == 0:
+                dataset = None
+            else:
+                dataset = hdf_group.get(addresses[0])
+            out += [dataset]
+    return out
+
+
+def get_data(hdf_group, names):
+    """
+    Return data values using names or addresses. If name is not an address, the first result of find_name will be used
+    :param hdf_group: hdf5 File or Group object
+    :param names: str or list of str of dataset names or addresses
+    :return: list of data, returning value, array or str
+    """
+    datasets = get_datasets(hdf_group, names)
+    if len(datasets) == 1:
+        return dataset_data(datasets[0])
+    return [dataset_data(dataset) for dataset in datasets]
+
+
+def get_datasets_dict(hdf_group, names):
+    """
+    Return data using data names, names can be addresses or simpler, where find will be used
+    :param hdf_group: hdf5 File or Group object
+    :param names: str or list of str of dataset names or addresses
+    :return: dict of datasets {name/address: dataset}
+    """
+    names = np.asarray(names, dtype=str).reshape(-1)
+    datasets = get_datasets(hdf_group, names)
+    out = dict(zip(names, datasets))
+    return out
+
+
+def get_data_dict(hdf_group, names):
+    """
+    Return data using data names, names can be addresses or simpler, where find will be used
+    :param hdf_group: hdf5 File or Group object
+    :param names: str or list of str of dataset names or addresses
+    :return: dict of data {name/address: data}
+    """
+    names = np.asarray(names, dtype=str).reshape(-1)
+    data = get_data(hdf_group, names)
+    out = dict(zip(names, data))
+    return out
+
+
+def data_strings(hdf_group, names, output_format=None):
+    """
+    Return strings of data using output_format
+    :param hdf_group: hdf5 File or Group object
+    :param names: list of str or str hdf dataset addresses or names
+    :param output_format: str
+    :return: str
+    """
+    if output_format is None:
+        output_format = OUTPUT_FORMAT
+
+    names = np.asarray(names, dtype=str).reshape(-1)
+    datasets = get_datasets(hdf_group, names)
+    out = []
+    for address, dataset in zip(names, datasets):
+        name = address_name(address)
+        if dataset:
+            data_str = dataset_string(dataset)
+        else:
+            data_str = 'Not available'
+        out += [output_format % (name, data_str)]
+    if len(names) == 1:
+        return out[0]
+    return out
+
+
+"-------------------------HDF GROUP FUNCTIONS-------------------------------"
+
+
+def scannumber(hdf_group):
+    """
+    Return the scan number of the file from the filename
+    :param hdf_group: hdf5 File or Group object
+    :return: int
+    """
+    return scanfile2number(hdf_group.file.filename)
+
+
+def tree(hdf_group, detail=False, recursion_limit=100):
+    """
+    Return str of the full tree of data in a hdf object
+    :param hdf_group: hdf5 File or Group object
+    :param detail: False/ True - provide further information about each group and dataset
+    :param recursion_limit: int max number of levels
+    :return: str
+    """
+    if recursion_limit < 1: return ''
+    outstr = '\nGroup: %s\n' % hdf_group.name
+    if detail:
+        for attr, val in hdf_group.attrs.items():
+            outstr += '  attr: %s: %s\n' % (attr, val)
+    try:
+        for branch in hdf_group.keys():
+            outstr += tree(hdf_group.get(branch), detail, recursion_limit-1)
+        return outstr
+    except AttributeError:
+        # doesn't have .keys(), hdf_group = dataset
+        if detail:
+            name = dataset_name(hdf_group)
+            out = '  dataset: %s\n' % hdf_group.name
+            out += '           %10s size: %5s, shape: %s\n' % (name, hdf_group.size, hdf_group.shape)
+            out += '    attrs: %s\n' % ','.join(hdf_group.attrs.keys())
+            out += '     data: %s\n' % dataset_string(hdf_group)
+        else:
+            out = '  %s, size: %s, shape: %s\n' % (hdf_group.name, hdf_group.size, hdf_group.shape)
+        return out
 
 
 def find_nxclass(hdf_group, nxclass='NX_detector'):
@@ -349,45 +449,49 @@ def auto_xyaxis(hdf_group):
     return xaxis[0], yaxis[0]
 
 
-def names2data(hdf_group, names):
+def duration(hdf_group, start_address='start_time', end_address='end_time'):
     """
-    Return data using data names, names can be addresses or simpler, where find will be used
-    :param hdf_group: hdf5 File or Group object
-    :param names: list
-    :return: dict
+    Determine the duration of a scan using the start_time and end_time datasets
+    :param hdf_group: hdf5 File or Group object 
+    :param start_address: address or name of start time dataset
+    :param end_address: address or name of end time dataset
+    :return: datetime.timedelta
     """
-    out = {}
-    for name in names:
-        dataset = hdf_group.get(name)
-        if dataset:
-            out[name] = dataset_data(dataset)
-        else:
-            addresses = find_name(hdf_group, name, match_case=True)
-            if len(addresses) == 0:
-                addresses = find_name(hdf_group, name, match_case=False)
-            if len(addresses) == 0:
-                data = []
-            else:
-                dataset = hdf_group.get(addresses[0])
-                data = dataset_data(dataset)
-            out[name] = data
-    return out
+    st_dataset, et_dataset = get_datasets(hdf_group, [start_address, end_address])
+    start_time = dataset_datetime(st_dataset)
+    if et_dataset is None:
+        end_time = datetime.datetime.now()
+    else:
+        end_time = dataset_datetime(et_dataset)
+    timedelta = end_time - start_time
+    return timedelta
 
 
-def names2string(hdf_group, names, output_format=None):
+def title(hdf_group, title_operation=None):
     """
-    Return string of data from names
+    Generate title from a string operation
     :param hdf_group: hdf5 File or Group object
-    :param names: list
-    :param output_format: str format or None
-    :return: dict
+    :param title_operation: str string_operatoin
+    :return: str
     """
-    addresses = []
-    for name in names:
-        address = find_name(hdf_group, name)
-        if address:
-            addresses += [address[0]]
-    return data_strings(hdf_group, addresses, output_format)
+    if title_operation is None:
+        title_operation = TITLE_COMMAND
+    return string_operation(hdf_group, title_operation)
+
+
+def label(hdf_group, label_operation=None):
+    """
+    Generate title from a string operation
+    :param hdf_group: hdf5 File or Group object
+    :param label_operation: str string_operatoin
+    :return: str
+    """
+    if label_operation is None:
+        label_operation = LABEL_COMMAND
+    return string_operation(hdf_group, label_operation)
+
+
+"------------------------------------ Operations ----------------------------------------------------"
 
 
 def names_operation(hdf_group, operation):
@@ -397,15 +501,34 @@ def names_operation(hdf_group, operation):
     Example:
         operation, data = names_operation(hdf, 'measurement/roi2_sum /Transmission')
         output = eval(operation, globals(), data)
+
+    The allowed and special names are tabulated below:
+       operation      | Example       | Explanation
+     /hdf/dataset/path| /entry1/title | quickly retreives dataset and returns data
+      dataset_name    | title         | searches the file tree for a dataset with that name, returns first hit
+      xaxis/axes      | axes          | determines the automatically assigned axes value
+      yaxis/signal    | signal        | determines the automatically assigned signal value
+      nroi            | nroi[31,31]   | creates a region of interest in the detector images
+
+    Notes on regions of interest:
+    Each 'nroi' in the operation will create a region of interest in the standard detector images and return the sum
+    of that region of interest. It will be renamed 'nroiN_sum in the final operation and dict, where N is roi number.
+      'nroi'      -   creates a region of interest in the detector centre with size 31x31
+      'nroi[h,v]' -   creates a roi in the detector centre with size hxv, where h is horizontal, v is vertical
+      'nroi[n,m,h,v] - create a roi with cen_h, cen_v, wid_h, wid_v = n, m, h, v
+
     :param hdf_group: hdf5 File or Group object
     :param operation: str operation e.g. 'measurement/roi2_sum /Transmission'
     :return operation: str updated operation string with addresses converted to names
     :return data: dict of names and data
     """
-    # First look for addresses in operation
+    # First look for addresses in operation to seperate addresses from divide operations
     addresses = re.findall(r'\w*?/[\w/]*', operation)
+
     data_dict = {}
-    for address in set(a.strip('/') for a in addresses):  # unique addresses with removed trailing /
+    for address in addresses:
+        if address_name(address) in data_dict:
+            continue
         # check if full address
         dataset = hdf_group.get(address)
         if dataset:
@@ -422,25 +545,85 @@ def names_operation(hdf_group, operation):
                 data_dict[name] = data
                 operation = operation.replace(address, name)
 
+    # Determine custom regions of interest 'nroi'
+    # rois = re.findall(r'nroi[\[\d,\]]*', operation)
+    rois = re.findall(r'nroi\[\d+,\d+,\d+,\d+\]|nroi\[\d+,\d+\]|nroi', operation)
+    for roi_no, roi in enumerate(rois):
+        roi_sum, roi_maxval = image_roi_op(hdf_group, roi)
+        name_sum = 'nroi%d_sum' % (roi_no + 1)
+        name_max = 'nroi%d_max' % (roi_no + 1)
+        data_dict[name_sum] = roi_sum
+        data_dict[name_max] = roi_maxval
+        operation = operation.replace(roi, name_sum)
+
     # Determine data for other variables
     names = re.findall(r'[a-zA-Z]\w*', operation)
     for name in names:
         if name in data_dict.keys():
+            continue
+        elif name.lower() in ['scanno', 'scannumber']:
+            data_dict[name] = scannumber(hdf_group)
             continue
         elif name.lower() in ['xaxis', 'axes']:
             f_address = find_attr(hdf_group, 'axes')
         elif name.lower() in ['yaxis', 'signal']:
             f_address = find_attr(hdf_group, 'signal')
         else:
+            f_address = find_name(hdf_group, name, match_case=True, whole_word=True)
+        if len(f_address) == 0:
             f_address = find_name(hdf_group, name, match_case=False, whole_word=True)
+        if len(f_address) == 0:
+            f_address = find_name(hdf_group, name, match_case=False, whole_word=False)
 
         if len(f_address) > 0:
-            dataset = hdf_group.get(f_address[0])
-            data = dataset_data(dataset)
-            f_name = address_name(f_address[0])
+            datasets = [hdf_group.get(ad) for ad in f_address]
+            max_len = np.argmax([ds.size for ds in datasets])
+            data = dataset_data(datasets[max_len])
+            f_name = address_name(f_address[max_len])
             data_dict[f_name] = data
             operation = operation.replace(name, f_name)
     return operation, data_dict
+
+
+def value_operation(hdf_group, operation, namespace_dict=None):
+    """
+    Evaluate operation and return result
+    :param hdf_group: hdf5 File or Group object
+    :param operation: str operation e.g. 'measurement/roi2_sum /Transmission'
+    :param namespace_dict: dict of additional values to add to eval namespace
+    :return operation: str updated operation string with addresses converted to names
+    :return result: result of evaluation
+    """
+    operation, data = names_operation(hdf_group, operation)
+    if namespace_dict is None:
+        namespace_dict = {}
+    namespace_dict.update(data)
+    result = eval(operation, globals(), namespace_dict)
+    return operation, result
+
+
+def string_operation(hdf_group, operation, namespace_dict=None):
+    """
+    Generate string including values from hdf file using values inside {} brackets
+    e.g.
+      operation = 'the energy is {energy} keV'
+      out = string_operation(hdf, operation)
+      # energy is found within hdf tree
+      out = 'the energy is 3.00 keV'
+    :param hdf_group: hdf5 File or Group object
+    :param operation: str operation e.g. 'measurement/roi2_sum /Transmission'
+    :param namespace_dict: dict of additional values to add to eval namespace
+    :return: str
+    """
+    # get values inside brackets
+    ops = re.findall(r'\{(.+?)\}', operation)
+    out_dict = {}
+    for op in ops:
+        op = op.split(':')[0]  # remove format specifier
+        gen_op, result = value_operation(hdf_group, op, namespace_dict)
+        out_dict[gen_op] = result
+        operation = operation.replace(op, gen_op)
+    return operation.format(**out_dict)
 
 
 def find_image(hdf_group, address='/', multiple=False):
@@ -605,6 +788,36 @@ def image_roi_sum(hdf_group, address=None, cen_h=None, cen_v=None, wid_h=31, wid
         roi_sum[n] = np.sum(roi)
         roi_max[n] = np.max(roi)
     return roi_sum, roi_max
+
+
+def image_roi_op(hdf_group, operation, address=None):
+    """
+    Create new region of interest (roi) from image data and return sum and maxval
+    The roi centre and size is defined by an operation:
+      operation = 'nroi[210, 97, 75, 61]'
+      'nroi'      -   creates a region of interest in the detector centre with size 31x31
+      'nroi[h,v]' -   creates a roi in the detector centre with size hxv, where h is horizontal, v is vertical
+      'nroi[m,n,h,v] - create a roi with cen_h, cen_v, wid_h, wid_v = n, m, h, v
+    :param hdf_group: hdf5 File or Group object
+    :param address: None or str : if not None, pointer to location of image data in hdf5
+    :param operation: str : operation string
+    :param cen_h: int centre of roi in dimension m (horizontal)
+    :param cen_v: int centre of roi in dimension n (vertical)
+    :param wid_h: int full width of roi in diemnsion m (horizontal)
+    :param wid_v: int full width of roi in dimension n (vertical)
+    :return: sum, maxval : [o] length arrays
+    """
+    vals = [int(val) for val in re.findall(r'\d+', operation)]
+    nvals = len(vals)
+    if nvals == 4:
+        cen_h, cen_v, wid_h, wid_v = vals
+    elif nvals == 2:
+        cen_h, cen_v = None, None
+        wid_h, wid_v = vals
+    else:
+        cen_h, cen_v = None, None
+        wid_h, wid_v = 31, 31
+    return image_roi_sum(hdf_group, address, cen_h, cen_v, wid_h, wid_v)
 
 
 "----------------------------------- HDF5 Class -----------------------------------"
