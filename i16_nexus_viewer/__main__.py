@@ -25,7 +25,8 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     import i16_nexus_viewer as nex16
 
-    print('\ni16_nexus_viewer version %s, %s\n By Dan Porter, Diamond Light Source Ltd.'%(nex16.__version__, nex16.__date__))
+    print('\ni16_nexus_viewer version %s, %s\n By Dan Porter, Diamond Light Source Ltd.' % (
+        nex16.__version__, nex16.__date__))
     print('See help(nex16.Experiment) for info, or nex16.start_gui() to get started!')
 
     for arg in sys.argv:
@@ -39,4 +40,3 @@ if __name__ == '__main__':
             print('------')
         elif 'gui' in arg.lower():
             nex16.start_gui()
-

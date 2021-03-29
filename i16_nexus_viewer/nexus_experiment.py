@@ -5,11 +5,10 @@ Define Experiment and Beamline objects
 import os
 import glob
 import numpy as np
-from copy import deepcopy
 
-from .nexus_scan import Scan, MultiScans
-from .functions_nexus import scanfile2number
-from .nexus_loader import hdf_data
+from .nexus_scan import Scan, MultiScan
+from .functions_nexus import scanfile2number, DEFAULTS, DEFAULTS_HELP, defaults_help
+from .functions_nexus import load, dataset_addresses
 
 
 class Beamline:
@@ -17,101 +16,45 @@ class Beamline:
     Beamline Class
     Contains beamline defaults for file names and data structure
     """
-    nexus_string_address = '/entry1'
-    nexus_array_address = '/entry1/measurement'
-    nexus_value_address = '/entry1/before_scan'
-    nexus_filename_format = '%06d.nxs'
-
-    label_format = '%s: %s'
-
-    normalisation_names = ['sum', 'maxval', 'roi2_sum', 'roi1_sum']
-    normalisation_command = '%s/Transmission/count_time'
-    error_names = [('sum', 'roi2_sum', 'roi1_sum')]
-    error_functions = ['np.sqrt(%s+1)']
-    duplicate_namespace_names = {
-        'en': 'energy',
-        'temp': 'Ta',
-    }
-
     def __init__(self, name):
         self.beamline_name = name
+        self.defaults = DEFAULTS.copy()
+        self.defaults_help = DEFAULTS_HELP.copy()
 
     def experiment(self, data_directory, working_directory='.', title=None):
         """Create an Experiment object using standard options for this beamline"""
         exp = Experiment(data_directory, working_directory, title, self)
-        exp.setup(
-            self.nexus_string_address,
-            self.nexus_array_address,
-            self.nexus_value_address,
-            self.nexus_filename_format,
-            self.label_format,
-            self.normalisation_names,
-            self.normalisation_command,
-            self.error_names,
-            self.error_functions,
-            self.duplicate_namespace_names
-        )
         return exp
 
     def __repr__(self):
         return 'Beamline(%s)' % self.beamline_name
 
-    def setup(self,
-              string_address='/entry1',
-              array_address='/entry1/measurement',
-              value_address='/entry1/before_scan',
-              filename_format='%06d.nxs',
-              label_format='%s: %s',
-              normalisation_names=None,
-              normalisation_command='%s/Transmission/count_time',
-              error_names=None,
-              error_functions=None,
-              duplicate_namespace_names=None,
-              ):
+    def __str__(self):
+        out = self.__repr__()
+        out += defaults_help(self.defaults, self.defaults_help)
+        return out
+
+    def setup(self, **kwargs):
         """
         Set beamline configuration for nexus files, analysis and output
-        :param string_address: str or list of str : hdf5 address(es) in nexus files for strings
-        :param array_address: str or list of str : hdf5 address(es) in nexus files for arrays
-        :param value_address:  str or list of str : hdf5 address(es) in nexus files for values
-        :param filename_format: str : filename format, must accept single int '%d'
-        :param label_format: str : output label format, must accept 2*str, e.g. '%s : %s'
-        :param normalisation_names: list : list of scanable names to automatically normalise
-        :param normalisation_command: str : command format, must accept single str, e.g. '10*%s'
-        :param error_names: list of lists of str : each element is a list of names that use error functions below
-        :param error_functions: list of str : each element is a command format, must accept single str, e.g. 'sqrt(%s)'
-        :param duplicate_namespace_names: dict : dataset names to dubplicate with different names {old_name: new_name}
+        See self.__str__() for options
         :return: None
         """
-        if duplicate_namespace_names is None:
-            duplicate_namespace_names = {'en': 'energy', 'temp': 'Ta'}
-        if error_functions is None:
-            error_functions = ['np.sqrt(%s+1)']
-        if error_names is None:
-            error_names = [('sum', 'roi2_sum', 'roi1_sum')]
-        if normalisation_names is None:
-            normalisation_names = ['sum', 'maxval', 'roi2_sum', 'roi1_sum']
-        self.nexus_value_address = deepcopy(value_address)
-        self.nexus_array_address = deepcopy(array_address)
-        self.nexus_string_address = deepcopy(string_address)
-        self.nexus_filename_format = deepcopy(filename_format)
-        self.label_format = deepcopy(label_format)
-        self.normalisation_names = deepcopy(normalisation_names)
-        self.normalisation_command = deepcopy(normalisation_command)
-        self.error_names = deepcopy(error_names)
-        self.error_functions = deepcopy(error_functions)
-        self.duplicate_namespace_names = deepcopy(duplicate_namespace_names)
+        if len(kwargs) == 0:
+            print('Parameter options:')
+            print(self.__str__())
+        self.defaults.update(kwargs)
 
 
-class Experiment(Beamline):
+class Experiment:
     """
     Experiment class
     Contains data directories and scan loading functions
     """
-    def __init__(self, data_directory, working_directory='.', title=None, beamline=None):
-        if beamline is None:
-            beamline = Beamline('None')
-        self.beamline = beamline
-        super().__init__(self.beamline.beamline_name)
+    def __init__(self, data_directory, working_directory='.', title=None, instrument=None):
+        if instrument is None:
+            instrument = Beamline('None')
+        self.instrument = instrument
         data_directory = np.asarray(data_directory).reshape(-1)
         self.data_directories = data_directory
         self.working_directory = working_directory
@@ -120,6 +63,13 @@ class Experiment(Beamline):
             title = os.path.basename(data_directory[0])
         self.title = title
 
+        self._defaults = self.instrument.defaults.copy()
+        self._defaults_help = self.instrument.defaults_help.copy()
+
+        self.dataset_addresses = None
+        self._updatemode = False
+        self._auto_normalise = True
+
     def __repr__(self):
         return 'Experiment(%s)' % self.title
 
@@ -127,11 +77,23 @@ class Experiment(Beamline):
         out = 'Experiment: %s\n' % self.title
         out += 'Data directories:\n  '
         out += '\n  '.join(self.data_directories)
-        out += '\nWorking directory:\n  %s\n' % self.working_directory
+        out += '\nWorking directory:\n  %s\n' % os.path.abspath(self.working_directory)
         scan_numbers = self.allscannumbers()
         out += 'Number of scans: %d\nFirst scan: %d\nLast scan: %d\n' % \
                (len(scan_numbers), scan_numbers[0], scan_numbers[-1])
         return out
+
+    def defaults(self, **kwargs):
+        """Set or display the experiment default parameters"""
+        if len(kwargs) == 0:
+            return defaults_help(self._defaults, self._defaults_help)
+        self._defaults.update(kwargs)
+
+    def auto_normalise(self, toggle=None):
+        """Toggle automomatic normalisation of parameters"""
+        if toggle is None:
+            toggle = not self._auto_normalise
+        self._auto_normalise = toggle
 
     def set_title(self, name):
         """Set experiment title"""
@@ -141,13 +103,36 @@ class Experiment(Beamline):
         data_directory = np.asarray(data_directory).reshape(-1)
         self.data_directories = np.append(self.data_directories, data_directory)
 
+    def get_addresses(self, scan_number=0, filename=None):
+        """Get addresses from scan file"""
+        if filename is None:
+            filename = self.getfile(scan_number)
+        with load(filename) as hdf_group:
+            addresses = dataset_addresses(hdf_group)
+        self.dataset_addresses = addresses
+
+    def update_mode(self, update=None):
+        """
+        When update mode is True, files will search their entire structure
+        This is useful when working in a live directory or with files from different times when the nexus files
+        don't have the same structure.
+        :param update: True/False or None to toggle
+        """
+        if update is None:
+            if self._updatemode:
+                update = False
+            else:
+                update = True
+        print('Update mode is: %s' % update)
+        self._updatemode = update
+
     def lastscan(self):
         """
         Get the latest scan number from the current experiment directory (self.data_directory[-1])
         Return None if no scans found.
         """
-
-        if os.path.isdir(self.data_directories[-1]) == False:
+        """
+        if not os.path.isdir(self.data_directories[-1]):
             print("I can't find the directory: {}".format(self.data_directories[0]))
             return None
 
@@ -163,6 +148,8 @@ class Experiment(Beamline):
         # newest = max(ls, key=os.path.getctime) # file created last
         num = scanfile2number(newest)
         return num
+        """
+        return self.allscannumbers()[-1]
 
     def allscanfiles(self):
         """
@@ -179,7 +166,8 @@ class Experiment(Beamline):
         Return a list of all scan numbers in the data directories
         """
         filelist = self.allscanfiles()
-        return [scanfile2number(file) for file in filelist]
+        return [scanfile2number(file) for file in filelist if
+                os.path.basename(file) == self._defaults['filename_format'] % scanfile2number(file)]
 
     def getfile(self, scan_number):
         """
@@ -192,73 +180,70 @@ class Experiment(Beamline):
         if scan_number < 1:
             scan_number = self.lastscan() + scan_number
 
-        filename = ''
         for directory in self.data_directories:
-            filename = os.path.join(directory, self.nexus_filename_format % scan_number)
-            if os.path.isfile(filename): break
-        return filename
+            filename = os.path.join(directory, self._defaults['filename_format'] % scan_number)
+            if os.path.isfile(filename):
+                return filename
+        raise Exception('Scan number: %s doesn\'t exist' % scan_number)
 
-    def loadscan(self, scan_number=0, filename=None):
+    def scan(self, scan_number=0, filename=None):
         """
         Generate Scan object for given scan using either scan number or filename.
         :param scan_number: int
         :param filename: str : scan filename
-        :return:
+        :return: Scan object
         """
+
         if filename is None:
             filename = self.getfile(scan_number)
+
         if os.path.isfile(filename):
-            return ExperimentScan(filename, self)
+            return Scan(filename, self, updatemode=self._updatemode)
+        raise Exception('Scan number: %s doesn\'t exist' % scan_number)
+    loadscan = readscan = scan
+
+    def scans(self, scan_numbers, filenames=None, axes='axes', signal='signal', variables=None, shape=None):
+        """
+        Generate MultiScan object for given range of scans using either scan number or filename.
+        :param scan_numbers: list of int scan numbers
+        :param filenames: str : list of str scan filenames
+        :param axes: default axis of each Loader
+        :param signal: default signal of each loader
+        :param variables: str or list of str values that change in each file
+        :param shape: tuple shape of data, allowing for multiple dimesion arrays (nLoaders, scany, scanx)
+        :return: MultiScan object
+        """
+        if filenames is None:
+            scan_numbers = np.asarray(scan_numbers).reshape(-1)
+            filenames = [self.getfile(scn) for scn in scan_numbers]
         else:
-            print('Scan does not exist: %s' % filename)
-            return None
+            filenames = np.asarray(filenames).reshape(-1)
+        scans = [Scan(filename, self, updatemode=self._updatemode) for filename in filenames]
+        return MultiScan(scans, axes, signal, variables, shape)
+    loadscans = readscans = scans
 
     def scandata(self, scan_numbers, address):
         """
         Fast return of data from scan number(s)
         :param scan_numbers: int or list : scan numbers to get data
-        :param address: str : hdf5 address
+        :param address: str : nexus address, name or command
         :return: data
         """
         scan_numbers = np.asarray(scan_numbers).reshape(-1)
         out = []
         for scan in scan_numbers:
-            out += [hdf_data(self.getfile(scan), address)]
+            out += [Scan(self.getfile(scan))(address)]
         if len(scan_numbers) == 1:
             return out[0]
         return out
 
     def printscan(self, scan_number=0, filename=None):
-        scan = self.loadscan(scan_number, filename)
+        scan = self.scan(scan_number, filename)
         print(scan)
 
-    def loadscans(self, scan_numbers, variable=None):
-        """
-        Return multi-scan object
-        """
-        scan_numbers = np.asarray(scan_numbers).reshape(-1)
-        scanlist = [self.loadscan(scan) for scan in scan_numbers]
-        return MultiScans([scan for scan in scanlist if scan], variable)
-
-    def printscans(self, scan_numbers, name=None):
+    def printscans(self, scan_numbers, variables=None):
         """print data for each scan"""
-        print(self.loadscans(scan_numbers, name).info())
+        if variables is None:
+            variables = self._defaults['cmd']
+        print(self.scans(scan_numbers, variables=variables))
 
-
-class ExperimentScan(Scan):
-    """
-    Version of Scan class called from Experiment
-    """
-    def __init__(self, filename, experiment):
-        self.experiment = experiment
-        super().__init__(filename, value_address=self.experiment.nexus_value_address,
-                         array_address=self.experiment.nexus_array_address,
-                         string_address=self.experiment.nexus_string_address)
-
-        self.filename_format = self.experiment.nexus_filename_format
-        self.label_format = self.experiment.label_format
-        self.normalisation_names = self.experiment.normalisation_names
-        self.normalisation_command = self.experiment.normalisation_command
-        self.error_names = self.experiment.error_names
-        self.error_functions = self.experiment.error_functions
-        self.duplicate_namespace_names = self.experiment.duplicate_namespace_names

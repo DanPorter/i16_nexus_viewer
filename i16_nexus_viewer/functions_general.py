@@ -7,10 +7,10 @@ making use of numpy and re.
 
 By Dan Porter, PhD
 Diamond
-2018
+2021
 
-Version 1.8.1
-Last updated: 01/12/20
+Version 2.0.0
+Last updated: 02/02/21
 
 Version History:
 06/01/18 1.0    Program created from DansGeneralProgs.py V2.3
@@ -23,14 +23,18 @@ Version History:
 12/05/20 1.7    Added sph2cart, replace_bracket_multiple
 20/07/20 1.8    Added vector_inersection and plane_intersection, updated findranges, added whererun
 01/12/20 1.8.1  Added get_methods function
+26/01/21 1.8.2  Added shortstr and squaredata
+02/02/21 2.0.0  Merged changes in other versions, added vector_intersection and you_normal_vector
 
 @author: DGPorter
 """
 
 import sys, os, re
 import numpy as np
+import inspect
 
-__version__ = '1.8.1'
+__version__ = '2.0.0'
+__date__ = '02/Feb/2021'
 
 # File directory
 directory = os.path.abspath(os.path.dirname(__file__))
@@ -44,6 +48,7 @@ u0 = 4 * pi * 1e-7  # H m-1 Magnetic permeability of free space
 me = 9.109e-31  # kg Electron rest mass
 Na = 6.022e23  # Avagadro's No
 A = 1e-10  # m Angstrom
+r0 = 2.8179403227e-15  # m classical electron radius = e^2/(4pi*e0*me*c^2)
 Cu = 8.048  # Cu-Ka emission energy, keV
 Mo = 17.4808  # Mo-Ka emission energy, keV
 # Mo = 17.4447 # Mo emission energy, keV
@@ -257,6 +262,27 @@ def rotate_about_axis(point, axis, angle):
     return point * cs + np.cross(axis, point) * sn + axis * np.dot(axis, point) * (1 - cs)
 
 
+def you_normal_vector(eta=0, chi=90, mu=0):
+    """
+    Determine the normal vector using the You diffractometer angles
+      you_normal_vector(0, 0, 0) = [1, 0, 0]
+      you_normal_vector(0, 90, 0) = [0, 1, 0]
+      you_normal_vector(90, 90, 0) = [0, 0, -1]
+      you_normal_vector(0, 0, 90) = [0, 0, -1]
+    :param eta: angle (deg) along the x-axis
+    :param mu: angle (deg) about the z-axis
+    :param chi: angle deg) a
+    :return: array
+    """
+    eta = np.deg2rad(eta)
+    chi = np.deg2rad(chi)
+    mu = np.deg2rad(mu)
+    normal = np.array([np.sin(mu) * np.sin(eta) * np.sin(chi) + np.cos(mu) * np.cos(chi),
+                       np.cos(eta) * np.sin(chi),
+                       -np.cos(mu) * np.sin(eta) * np.sin(chi) - np.sin(mu) * np.cos(chi)])
+    return normal
+
+
 def group(A, tolerance=0.0001):
     """
     Group similear values in an array, returning the group and indexes
@@ -360,14 +386,47 @@ def vector_intersection(point1, direction1, point2, direction2):
     direction1 = np.asarray(direction1) / np.sqrt(np.sum(np.square(direction1)))
     direction2 = np.asarray(direction2) / np.sqrt(np.sum(np.square(direction2)))
 
-    if np.dot(direction1, direction2) == 1:
-        print('Vectors are parallel')
-        return np.nan
-
     mat = np.array([direction1, -direction2])
-    ua, ub = np.dot(point2 - point1, np.linalg.inv(mat))
-    intersect = point1 + ua * direction1
+    try:
+        inv = np.linalg.inv(mat)
+    except np.linalg.LinAlgError:
+        print('Vectors are parallel')
+        return np.array([np.nan, np.nan])
+    ua, ub = np.dot(point2 - point1, inv)
+    intersect = point1 + ua*direction1
     return intersect
+
+
+def vector_intersection3d(point1, direction1, point2, direction2):
+    """
+    Calculate the point in 3D where two lines cross.
+    If lines are parallel, return nan
+    For derivation, see: https://math.stackexchange.com/questions/270767/find-intersection-of-two-3d-lines/271366
+    :param point1: [x,y,z] some coordinate on line 1
+    :param direction1: [dx, dy, dz] the direction of line 1
+    :param point2: [x,y,z] some coordinate on line 2
+    :param direction2: [dx, dy, dz] the direction of line 2
+    :return: [x, y, z]
+    """
+
+    point1 = np.asarray(point1)
+    point2 = np.asarray(point2)
+    direction1 = np.asarray(direction1)/np.sqrt(np.sum(np.square(direction1)))
+    direction2 = np.asarray(direction2)/np.sqrt(np.sum(np.square(direction2)))
+
+    line = point2 - point1
+    c1 = np.cross(direction2, line)
+    c2 = np.cross(direction2, direction1)
+    h = mag(c1)
+    k = mag(c2)
+    a = ang(c1, c2)
+    if h == 0 or k == 0:
+        print('Lines parallel')
+        return np.array([np.nan, np.nan, np.nan])
+    v = (h/k) * direction1
+    if np.abs(a) < np.pi/2:
+        return point1 + v
+    return point1 - v
 
 
 def plane_intersection(line_point, line_direction, plane_point, plane_normal):
@@ -390,9 +449,9 @@ def plane_intersection(line_point, line_direction, plane_point, plane_normal):
 
     if u2 == 0:
         print('Plane is parallel to line')
-        return np.nan
+        return None
     u = u1 / u2
-    intersect = line_point + u * line_direction
+    intersect = line_point + u*line_direction
     return intersect
 
 
@@ -482,6 +541,13 @@ def detail(A):
     print('Min: {}, Max: {}, Mean: {}, NaNs: {}'.format(np.nanmin(A), np.nanmax(A), np.nanmean(A), np.sum(np.isnan(A))))
 
 
+def inline_help(func):
+    """Return function spec and first line of help in line"""
+    fun_name = '%s%s' % (func.__name__, inspect.signature(func))
+    fun_doc = func.__doc__.strip().split('\n')[0] if func.__doc__ else ""
+    return "%s\n\t%s" % (fun_name, fun_doc)
+
+
 def array_str(A):
     """
     Returns a short string with array information
@@ -489,11 +555,19 @@ def array_str(A):
     :return: str
     """
     shape = np.shape(A)
-    amax = np.max(A)
-    amin = np.min(A)
-    amean = np.mean(A)
-    out_str = "%s max: %4.5g, min: %4.5g, mean: %4.5g"
-    return out_str % (shape, amax, amin, amean)
+    try:
+        amax = np.max(A)
+        amin = np.min(A)
+        amean = np.mean(A)
+        out_str = "%s max: %4.5g, min: %4.5g, mean: %4.5g"
+        return out_str % (shape, amax, amin, amean)
+    except TypeError:
+        # list of str
+        array = np.asarray(A).reshape(-1)
+        array_start = array[0]
+        array_end = array[-1]
+        out_str = "%s [%s, ..., %s]"
+        return out_str % (shape, array_start, array_end)
 
 
 def print_arrays(arrays=[]):
@@ -884,6 +958,18 @@ def replace_bracket_multiple(name):
     return name
 
 
+def shortstr(string):
+    """
+    Shorten string by removing long floats
+    :param string: string, e.g. '#810002 scan eta 74.89533603616637 76.49533603616636 0.02 pil3_100k 1 roi2'
+    :return: shorter string, e.g. '#810002 scan eta 74.895 76.495 0.02 pil3_100k 1 roi2'
+    """
+    #return re.sub(r'(\d\d\d)\d{4,}', r'\1', string)
+    def subfun(m):
+        return str(round(float(m.group()), 3))
+    return re.sub(r'\d+\.\d{5,}', subfun, string)
+
+
 def nice_print(precision=4, linewidth=300):
     """
     Sets default printing of arrays to a nicer format
@@ -931,6 +1017,33 @@ def frange(start, stop=None, step=1):
         start = 0
 
     return list(np.arange(start, stop + 0.00001, step, dtype=np.float))
+
+
+def squaredata(xdata, ydata, data, repeat=None):
+    """
+    Generate square arrays from 1D data, automatically determinging the repeat value
+    :param xdata: [n] array
+    :param ydata: [n] array
+    :param data: [n] array
+    :param repeat: int m or None to deteremine m from differences in xdata and y data
+    :return: X, Y, D [n//m, m] arrays
+    """
+
+    if repeat is None:
+        # Determine the repeat length of the scans
+        delta_x = np.abs(np.diff(xdata))
+        ch_idx_x = np.where(delta_x > delta_x.max() * 0.9)  # find biggest changes
+        ch_delta_x = np.diff(ch_idx_x)
+        rep_len_x = np.round(np.mean(ch_delta_x))
+        delta_y = np.abs(np.diff(ydata))
+        ch_idx_y = np.where(delta_y > delta_y.max() * 0.9)  # find biggest changes
+        ch_delta_y = np.diff(ch_idx_y)
+        rep_len_y = np.round(np.mean(ch_delta_y))
+        repeat = int(max(rep_len_x, rep_len_y))
+    xsquare = xdata[:repeat * (len(xdata) // repeat)].reshape(-1, repeat)
+    ysquare = ydata[:repeat * (len(ydata) // repeat)].reshape(-1, repeat)
+    dsquare = data[:repeat * (len(data) // repeat)].reshape(-1, repeat)
+    return xsquare, ysquare, dsquare
 
 
 def grid_intensity(points, values, resolution=0.01, peak_width=0.1, background=0):
@@ -1029,3 +1142,8 @@ def get_methods(object, include_special=True):
         return [method_name for method_name in dir(object) if callable(getattr(object, method_name))]
     return [method_name for method_name in dir(object) if callable(getattr(object, method_name)) and '__' not in method_name]
 
+
+def list_methods(object, include_special=False):
+    """Return list of methods (functions) in class object"""
+    methods = get_methods(object, include_special)
+    return '\n'.join([inline_help(getattr(object, fun)) for fun in methods])

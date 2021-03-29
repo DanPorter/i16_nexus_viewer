@@ -30,20 +30,21 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from . import functions_nexus as fn
-from .fitting import peakfit
 
 
-"----------------------------------- HdfLoader Class -----------------------------------"
+"----------------------------------------------------------------------------------------------------------------------"
+"-------------------------------------------- NexusLoader -------------------------------------------------------------"
+"----------------------------------------------------------------------------------------------------------------------"
 
 
-class NexusReLoader:
+class NexusLoader:
     """
-    HdfLoader class
+    NexusLoader class
     Collection of functions to operate on a hdf or nexus file
     Doesn't load the file into memory at any point but reads the file on every operation, making it very simple and
     reliable but quite slow.
     Useage:
-      d = HdfLoader('12345.nxs')
+      d = NexusLoader('12345.nxs')
       xdata, ydata = d('axes, signal')
 
     Behaviour:
@@ -62,17 +63,26 @@ class NexusReLoader:
     Inputs:
     :param filename: str filename of the HDF5 (.hdf) or NeXus (.nxs) file
     """
-    def __init__(self, filename):
+    def __init__(self, filename, address_list=None, updatemode=False):
         self.filename = filename
         self.basename = os.path.basename(filename)
 
-        self.title_command = fn.TITLE_COMMAND
-        self.label_command = fn.LABEL_COMMAND
+        if address_list is None:
+            self._address_list = self.addresses()
+        else:
+            self._address_list = address_list
+
+        self._namespace = {}
+        self._name_associations = {}
+        self._updatemode = updatemode
+        self._axes_address = None
+        self._signal_address = None
+        self._image_address = None
         self.fit_results = {}
         self._lmfit = None
 
     def __repr__(self):
-        return 'NexusReLoader(\'%s\')' % self.filename
+        return 'NexusLoader(\'%s\')' % self.filename
 
     def __str__(self):
         out = '%s\n' % (fn.OUTPUT_FORMAT % ('filename', self.basename))
@@ -80,47 +90,116 @@ class NexusReLoader:
         out += '%s\n' % (fn.OUTPUT_FORMAT % ('axes', axes))
         out += '%s\n' % (fn.OUTPUT_FORMAT % ('signal', signal))
         top_addresses = self.addresses(recursion_limit=2)
-        out += '\n'.join(self.data_string(top_addresses))
+        s = '\n'.join('%20s : {%s}' % (fn.address_name(a), a) for a in top_addresses)
+        out += self.string_operation(s)
         return out
 
     def __call__(self, *args, **kwargs):
         return self.eval_operation(*args, **kwargs)
 
     def __getitem__(self, item):
-        return self.dataset(item)
+        hdf = fn.load(self.filename)
+        group = hdf.get(item)
+        if group:
+            return group
+        datasets = fn.get_datasets(hdf, item)
+        if len(datasets) == 1:
+            return datasets[0]
+        return datasets
 
     def __add__(self, addee):
         """
         Add two scans together somehow
         """
-        return NexusMultiReLoader([self, addee])
+        return NexusMultiLoader([self, addee])
 
     def load(self):
-        """Load hdf or nxs file"""
+        """Load hdf or nxs file, return open hdf object"""
         return fn.load(self.filename)
 
     def dataset(self, address):
-        """Return dataset from a hdf file at given address, this leaves the file open."""
-        with fn.load(self.filename) as hdf:
-            dataset = fn.get_datasets(hdf, address)
-            return dataset
-    get = dataset
+        """Return dataset from a hdf file at given address or search using a name, this leaves the file open."""
+        hdf = fn.load(self.filename)
+        datasets = fn.get_datasets(hdf, address, self._address_list)
+        if len(datasets) == 1:
+            return datasets[0]
+        return datasets
+    get = __getitem__
 
-    def addresses(self, address='/', recursion_limit=100):
+    def address(self, name):
+        """Return address of dataset called name"""
+        with fn.load(self.filename) as hdf:
+            data = fn.get_address(hdf, name, self._address_list)
+        return data
+
+    def group_address(self, name):
+        """Return address of hdf group using name"""
+        with fn.load(self.filename) as hdf:
+            data = fn.get_group_address(hdf, name, self._address_list)
+        return data
+
+    def addresses(self, address='/', recursion_limit=100, get_size=None, get_ndim=None):
         """
-        Return list of addresses of datasets, starting at each address
-        :param address: list of str or str : start in this / these addresses
+        Return list of addresses of datasets, starting at each group address
+        :param address: list of str or str : start in this / these addresses of hdf groups
         :param recursion_limit: Limit on recursivley checking lower groups
+        :param get_size: None or int, if int, return only datasets with matching size
+        :param get_ndim: None or int, if int, return only datasets with matching ndim
         :return: list of str
         """
         with fn.load(self.filename) as hdf_group:
-            out = fn.dataset_addresses(hdf_group, address, recursion_limit)
+            out = fn.dataset_addresses(hdf_group, address, recursion_limit, get_size, get_ndim)
         return out
 
+    # Change all these?
     def data(self, addresses):
-        """Return data from a hdf file at given address"""
+        """Return data from a hdf file at given dataset address"""
         with fn.load(self.filename) as hdf:
-            data = fn.get_data(hdf, addresses)
+            data = fn.get_data(hdf, addresses, self._address_list)
+        return data
+
+    def value(self, addresses):
+        """Return single value data from a hdf file at given dataset address"""
+        with fn.load(self.filename) as hdf:
+            data = fn.get_value(hdf, addresses)
+        return data
+
+    def group_data(self, addresses):
+        """Return data from a hdf file, expands group addresses to group constituents"""
+        with fn.load(self.filename) as hdf:
+            data = fn.get_group_data(hdf, addresses)
+        return data
+
+    def group_values(self, addresses):
+        """Return dict of values from a hdf file, expands group addresses to group constituents"""
+        with fn.load(self.filename) as hdf:
+            data = fn.get_group_values(hdf, addresses)
+        return data
+
+    def group_string(self, addresses):
+        """Return dict of values from a hdf file, expands group addresses to group constituents"""
+        with fn.load(self.filename) as hdf:
+            data = fn.get_group_string(hdf, addresses)
+        return '\n'.join(data)
+
+    def array_data(self, addresses, data_length=None):
+        """
+        Rerturn array of data from hdf file
+        expands group addresses and returns array of same length arrays
+        addresses with array length 1 are expanded to the shortest length of other arrays or data_length if defined
+        """
+        with fn.load(self.filename) as hdf:
+            data = fn.get_group_array(hdf, addresses, data_length)
+        return data
+
+    def dataframe(self, addresses):
+        """
+        Rerturn Pandas DataFrame of data from hdf file
+        expands group addresses and returns array of same length arrays
+        addresses with array length 1 are expanded to the shortest length of other arrays or data_length if defined
+        """
+        with fn.load(self.filename) as hdf:
+            data = fn.get_dataframe(hdf, addresses)
         return data
 
     def data_dict(self, addresses):
@@ -145,25 +224,13 @@ class NexusReLoader:
         :return: datetime.datetime
         """
         with fn.load(self.filename) as hdf:
-            datasets = fn.get_datasets(hdf, address)
+            datasets = fn.get_datasets(hdf, address, self._address_list)
             date = [fn.dataset_datetime(dataset, input_format, output_format) for dataset in datasets]
         if len(date) == 1:
             return date[0]
         return date
 
     "------------------------- String Generators -------------------------------------------"
-
-    def data_string(self, addresses, output_format=None):
-        """
-        Return strings of data using output_format
-        :param filename: str hdf fileaname
-        :param addresses: list of str or str hdf dataset addresses
-        :param output_format: str
-        :return: str
-        """
-        with fn.load(self.filename) as hdf:
-            out_str = fn.data_strings(hdf, addresses, output_format)
-        return out_str
 
     def tree(self, address='/', detail=False, recursion_limit=100):
         """Open hdf file and return tree string"""
@@ -174,19 +241,20 @@ class NexusReLoader:
 
     "----------------------------- Search methods -------------------------------------------"
 
-    def find_name(self, name, address='/', match_case=False, whole_word=False):
+    def find_name(self, name, match_case=False, whole_word=False):
         """
         Find datasets using field name
         :param name: str : name to match in dataset field name
-        :param address: str : address to start in
         :param match_case: if True, match case of name
         :param whole_word: if True, only return whole word matches
         :return: list of str addresses
         """
-        with fn.load(self.filename) as hdf:
-            hdf_group = hdf.get(address)
-            out = fn.find_name(hdf_group, name, match_case, whole_word)
-        return out
+        results = fn.find_name(name, self._address_list, match_case, whole_word)
+        if len(results) == 0:
+            print('updating address list')
+            self._address_list = self.addresses()
+            results = fn.find_name(name, self._address_list, match_case, whole_word)
+        return results
 
     def find_nxclass(self, nxclass='NX_detector', address='/'):
         """
@@ -213,41 +281,54 @@ class NexusReLoader:
             out = fn.find_attr(hdf_group, attr)
         return out
 
-    def find_image(self, address='/', multiple=False):
+    def find_image(self, multiple=False):
         """
         Return address of image data in hdf file
         Images can be stored as list of file directories when using tif file,
         or as a dynamic hdf link to a hdf file.
 
         :param filename: str hdf file
-        :param address: initial hdf address to look for image data
         :param multiple: if True, return list of all addresses matching criteria
         :return: str or list of str
         """
         with fn.load(self.filename) as hdf:
-            out = fn.find_image(hdf, address, multiple)
+            out = fn.find_image(hdf, self._address_list, multiple)
         return out
 
     "------------------------- Automatic Axes -------------------------------------------"
 
-    def auto_xyaxis(self, address='/'):
+    def auto_xyaxis(self, address='/', cmd_string=None):
         """
         Find default axes, signal hdf addresses
         :param address: str addtress to start in
+        :param cmd_string: str of command to take x,y axis from as backup
         :return: xaxis_address, yaxis_address
         """
+        if self._axes_address and self._signal_address:
+            return self._axes_address, self._signal_address
         with fn.load(self.filename) as hdf:
             hdf_group = hdf.get(address)
-            xaxis, yaxis = fn.auto_xyaxis(hdf_group)
+            xaxis, yaxis = fn.auto_xyaxis(hdf_group, cmd_string, self._address_list)
+        self._axes_address = xaxis
+        self._signal_address = yaxis
+        xname = fn.address_name(xaxis)
+        yname = fn.address_name(yaxis)
+        axis = {
+            'axes': xname,
+            'signal': yname,
+            'xaxis': xname,
+            'yaxis': yname,
+            xaxis: xname,
+            yaxis: yname,
+        }
+        self.add_to_associations(**axis)
         return xaxis, yaxis
 
     def axes(self):
         """Return axes (xaxis) label and data"""
-        address = self.find_attr('axes')
+        address, _ = self.auto_xyaxis()
         if not address:
             return 'None', None
-        else:
-            address = address[0]
         name = fn.address_name(address)
         data = self.data(address)
         return name, data
@@ -255,53 +336,70 @@ class NexusReLoader:
 
     def signal(self):
         """Return signal (yaxis) label and data"""
-        address = self.find_attr('signal')
+        _, address = self.auto_xyaxis()
         if not address:
             return 'None', None
-        else:
-            address = address[0]
         name = fn.address_name(address)
         data = self.data(address)
         return name, data
     yaxis = signal
 
-    def duration(self, start_address='start_time', end_address='end_time'):
-        """
-        Determine the duration of a scan using the start_time and end_time datasets
-        :param start_address: address or name of start time dataset
-        :param end_address: address or name of end time dataset
-        :return: datetime.timedelta
-        """
-        with fn.load(self.filename) as hdf:
-            timedelta = fn.duration(hdf, start_address, end_address)
-        return timedelta
-
-    def scan_number(self):
-        with fn.load(self.filename) as hdf:
-            scanno = fn.scannumber(hdf)
-        return scanno
-
-    def title(self, title_command=None):
-        """
-        Generate scan title
-        :param title_command:
-        :return: str
-        """
-        if title_command is None:
-            title_command = self.title_command
-        return self.string_operation(title_command)
-
-    def label(self, label_command=None):
-        """
-        Generate scan title
-        :param label_command: str command e.g. '#{scanno}'
-        :return: str
-        """
-        if label_command is None:
-            label_command = self.label_command
-        return self.string_operation(label_command)
+    def image_address(self):
+        """Return address of image data"""
+        if self._image_address is not None:
+            return self._image_address
+        address = self.find_image()
+        if address:
+            self._image_address = address
+        else:
+            raise Exception('Image address not found')
+        return address
 
     "---------------------------- Operations -------------------------------------------"
+
+    def get_namespace(self):
+        """Returns the current operation namespace and name association dicts"""
+        if self._updatemode:
+            namespace = {}
+        else:
+            namespace = self._namespace
+        associations = self._name_associations
+        namespace.update(self.fit_results)
+        return namespace, associations
+
+    def update_namespace(self, updatemode=True):
+        """Turns on updatemode, forcing new searches on each operation"""
+        self._updatemode = updatemode
+        if updatemode:
+            self._namespace = {}
+            self._address_list = self.addresses()
+
+    def add_to_namespace(self, **kwargs):
+        """
+        Add values to the NexusLoader namespace
+             self.add_to_namespace(cmd='scan x 1 2 1 pil 1')
+        """
+        self._namespace.update(kwargs)
+
+    def add_to_associations(self, **kwargs):
+        """
+        Add address to the NexusLoader names associations
+             self.add_to_associations(signal='/entry1/measurement/sum')
+        """
+        self._name_associations.update(kwargs)
+
+    def show_namespace(self):
+        """Return str of namespace etc"""
+        out = '\nAddress list:\n  '
+        out += '\n  '.join(self._address_list)
+        out += '\nnamespace:\n  '
+        out += '\n  '.join('%s : %s' % (nm, type(dt)) for nm, dt in self._namespace.items())
+        out += '\nname associations:\n  '
+        out += '\n  '.join('%s : %s' % (n1, n2) for n1, n2 in self._name_associations.items())
+        out += '\n\n  axes = %s' % self._axes_address
+        out += '\nsignal = %s' % self._signal_address
+        out += '\n image = %s' % self._image_address
+        return out
 
     def names_operation(self, operation, address='/'):
         """
@@ -331,33 +429,62 @@ class NexusReLoader:
         :return operation: str updated operation string with addresses converted to names
         :return data: dict of names and data
         """
+        namespace, associated_names = self.get_namespace()
+        # Check operation isn't already in namespace
+        if operation in namespace:
+            return operation, namespace
+        if operation in associated_names and associated_names[operation] in namespace:
+            return associated_names[operation], namespace
+
+        # Load file
         with fn.load(self.filename) as hdf:
             hdf_group = hdf.get(address)
-            operation, data_dict = fn.names_operation(hdf_group, operation)
+            operation, data_dict, ndict = fn.names_operation(
+                hdf_group,
+                operation,
+                namespace,
+                associated_names,
+                self._address_list
+            )
+            self._namespace.update(data_dict)
+            self._name_associations.update(ndict)
         return operation, data_dict
 
-    def eval_operation(self, operation, address='/', namespace_dict=None):
+    def eval_operation(self, operation, address='/'):
         """Evaluate a string, names and addresses from the hdf file can be used"""
         operation, data = self.names_operation(operation, address)
-        if namespace_dict is None:
-            namespace_dict = {}
-        namespace_dict.update(self.fit_results)
-        namespace_dict.update(data)
-        return eval(operation, globals(), namespace_dict)
+        return eval(operation, globals(), data)
 
-    def get_operation(self, operation, address='/', namespace_dict=None):
+    def get_operation(self, operation, address='/'):
         """Return corrected operation string and evaluation result"""
-        with fn.load(self.filename) as hdf:
-            hdf_group = hdf.get(address)
-            operation, result = fn.value_operation(hdf_group, operation, namespace_dict)
+        operation, data = self.names_operation(operation, address)
+        result = eval(operation, globals(), data)
+        if result is None:
+            raise Exception('%s not available' % operation)
         return operation, result
 
-    def string_operation(self, operation, address='/', namespace_dict=None):
-        """Return formated string with values from file"""
+    def string_operation(self, operation, address='/', shorten=True):
+        """
+        Return string with values from file
+        e.g.
+        operation = 'the title is {title}'
+        out = self.string_operation(operation)
+        out: 'the title is scan eta ...'
+        :param operation: str with nexus dataset names in {brackets}
+        :param address: address of hdf group to start in
+        :param shorten: bool if True, automatically shorten long floats
+        :return: str
+        """
+        namespace, associated_names = self.get_namespace()
         with fn.load(self.filename) as hdf:
             hdf_group = hdf.get(address)
-            out_str = fn.string_operation(hdf_group, operation, namespace_dict)
-        return out_str
+            out_str, data_dict, name_dict = fn.string_command(
+                hdf_group, operation, namespace, associated_names, self._address_list)
+            self._namespace.update(data_dict)
+            self._name_associations.update(name_dict)
+        if shorten:
+            return fn.shortstr(out_str.format(**data_dict))
+        return out_str.format(**data_dict)
 
     "------------------------- Detector Images -------------------------------------------"
 
@@ -370,8 +497,24 @@ class NexusReLoader:
         :param address: None or str : if not None, pointer to location of image data in hdf5
         :return: 2d array if index given, 3d array otherwise
         """
+        if address is None:
+            address = self.image_address()
         with fn.load(self.filename) as hdf:
             out = fn.image_data(hdf, index, address)
+        return out
+
+    def volume_data(self, address=None):
+        """
+        Return image volume, if available
+        if index=None, all images are combined, otherwise only a single frame at index is returned
+        :param hdf_group: hdf5 File or Group object
+        :param address: None or str : if not None, pointer to location of image data in hdf5
+        :return: 3d array [npoints, pixel_i, pixel_j]
+        """
+        if address is None:
+            address = self.image_address()
+        with fn.load(self.filename) as hdf:
+            out = fn.volume_data(hdf, address)
         return out
 
     def image_roi(self, address=None, cen_h=None, cen_v=None, wid_h=31, wid_v=31):
@@ -384,6 +527,8 @@ class NexusReLoader:
         :param wid_v: int full width of roi in dimension n (vertical)
         :return: [n, wid_v, wid_h] array of roi
         """
+        if address is None:
+            address = self.image_address()
         with fn.load(self.filename) as hdf:
             roi = fn.image_roi(hdf, address, cen_h, cen_v, wid_h, wid_v)
         return roi
@@ -398,137 +543,43 @@ class NexusReLoader:
         :param wid_v: int full width of roi in dimension n (vertical)
         :return: sum, maxval : [o] length arrays
         """
+        if address is None:
+            address = self.image_address()
         with fn.load(self.filename) as hdf:
             roi_sum, roi_max = fn.image_roi_sum(hdf, address, cen_h, cen_v, wid_h, wid_v)
         return roi_sum, roi_max
 
-    "------------------------------- Plot -------------------------------------------"
 
-    def plot_line(self, axes, xaxis='axes', yaxis='signal', *args, label=None, **kwargs):
-        """
-        Plot line on given matplotlib axes subplot
-        :param axes: matplotlib.axes subplot
-        :param xaxis: str name or address of array to plot on x axis
-        :param yaxis: str name or address of array to plot on y axis
-        :param label: str label for this line
-        :param args: given directly to plt.plot(..., *args, **kwars)
-        :param kwargs: given directly to plt.plot(..., *args, **kwars)
-        :return: lines object, output of plot
-        """
-        if axes is None:
-            axes = plt.gca()
-        xname, xdata = self.get_operation(xaxis)
-        yname, ydata = self.get_operation(yaxis)
-
-        if label is None:
-            label = yname
-
-        #if self._plot_errors:
-        #    yerror = self._error(yaxis)
-        #    lines = axes.errorbar(xdata, ydata, yerror, *args, label=label, **kwargs)
-        #else:
-        #    lines = axes.plot(xdata, ydata, *args, label=label, **kwargs)
-        lines = axes.plot(xdata, ydata, *args, label=label, **kwargs)
-        return lines
-
-    def plot(self, xaxis='axes', yaxis='signal', *args, **kwargs):
-        """
-        Create new matplotlib figure and plot arrays
-        :param xaxis: str name or address of array to plot on x axis
-        :param yaxis: str name or address of array to plot on y axis
-        :param args: given directly to plt.plot(..., *args, **kwars)
-        :param kwargs: given directly to plt.plot(..., *args, **kwars)
-        :return: lines object, output of plot
-        """
-        xname, xdata = self.get_operation(xaxis)
-        list_yaxis = np.asarray(yaxis, dtype=str).reshape(-1)
-        yname, ydata = self.get_operation(list_yaxis[0])
-
-        fig, ax = plt.subplots(figsize=fn.FIG_SIZE, dpi=fn.FIG_DPI)
-        lines = []
-        for yaxis in list_yaxis:
-            lines += self.plot_line(ax, xaxis, yaxis, *args, **kwargs)
-
-        plt.title(self.title())
-        plt.xlabel(xname)
-        plt.ylabel(yname)
-        plt.legend(list_yaxis)
-        return lines
-
-    def plot_image(self, index, image_address=None):
-        """Plot detector image"""
-
-        fig, ax = plt.subplots(figsize=fn.FIG_SIZE, dpi=fn.FIG_DPI)
-        im = self.image_data(index, image_address)
-        ax.pcolormesh(im, shading='gouraud')
-        ax.invert_yaxis()
-
-        plt.axis('image')
-        plt.title(self.title())
-
-    "------------------------------- fitting -------------------------------------------"
-
-    def fit(self, xaxis='axes', yaxis='signal', yerrors=None, fit_type=None, print_result=True, plot_result=False):
-        """
-        Automatic fitting of scan
-
-        Use LMFit
-        Pass fit_type = LMFit model
-        return LMFit output
-        """
-
-        xname, xdata = self.get_operation(xaxis)
-        yname, ydata = self.get_operation(yaxis)
-        if yerrors:
-            error_name, error_data = self.get_operation(yerrors)
+"----------------------------------------------------------------------------------------------------------------------"
+"--------------------------------------- NexusMultiLoader -------------------------------------------------------------"
+"----------------------------------------------------------------------------------------------------------------------"
 
 
-        # lmfit
-        out = peakfit(xdata, ydata)
-
-        self._lmfit = out
-        fit_dict = {}
-        for pname, param in out.params.items():
-            ename = 'stderr_' + pname
-            fit_dict[pname] = param.value
-            fit_dict[ename] = param.stderr
-        self.fit_results.update(fit_dict)
-
-        if print_result:
-            print(self.title())
-            print(out.fit_report())
-        if plot_result:
-            fig, grid = out.plot()
-            plt.suptitle(self.title(), fontsize=12)
-            plt.subplots_adjust(top=0.85, left=0.15)
-            ax1, ax2 = fig.axes
-            ax2.set_xlabel(xname)
-            ax2.set_ylabel(yname)
-        return out
-
-    def fit_result(self, parameter_name=None):
-        """Returns parameter, error from the last run fit"""
-        if self._lmfit is None:
-            self.fit()
-        if parameter_name is None:
-            return self._lmfit
-        param = self._lmfit.params[parameter_name]
-        return param.value, param.stderr
-
-
-class NexusMultiReLoader:
+class NexusMultiLoader:
     """
-    NexusMultiReLoader
+    NexusMultiLoader - container for multiple NexusLoader objects
+    e.g.
+    d1 = NexusLoader("file1.nxs")
+    d2 = NexusLoader("file2.nxs")
+    group = NexusMultiLoader([d1, d2])
+
+    The same can be achieved by adding NexusLoader objects:
+    group = d1 + d2
+
+    Actions:
+     group('command') >> returns list of NexusLoader('command') results for each object in the group
+     group[n] >> returns NexusLoader n from list
+
+    Additional parameters (can also be set by self.param(value)):
+    :param loaders: list of NexusLoader objects
     """
     def __init__(self, loaders):
         self.loaders = loaders
         self.filenames = [loader.filename for loader in self.loaders]
-        self.scan_range = [loader.scan_number() for loader in self.loaders]
         self._first = loaders[0]
-        self._variables = None
 
     def __repr__(self):
-        return "NexusMultiReLoader(%d files)" % len(self.loaders)
+        return "NexusMultiLoader(%d files)" % len(self.loaders)
 
     def __str__(self):
         return '\n'.join(['%r' % loader for loader in self.loaders])
@@ -537,87 +588,28 @@ class NexusMultiReLoader:
         return [loader(name) for loader in self.loaders]
 
     def __add__(self, addee):
-        return NexusMultiReLoader(self.loaders + [addee])
+        return NexusMultiLoader(self.loaders + [addee])
 
     def __getitem__(self, key):
-        return [loader[key] for loader in self.loaders]
+        #return [loader[key] for loader in self.loaders]
+        return self.loaders.__getitem__(key)
 
-    def set_variables(self, name):
-        """Set default variable that changes with each scan"""
-        self._variables = np.asarray(name, dtype=str).reshape(-1)
+    def data(self, name):
+        """Return list of data for each stored NexusLoader"""
+        return [loader.data(name) for loader in self.loaders]
 
-    def create_array(self, name):
-        """Return numerical array from values"""
-        return np.array([np.asarray(val) for val in self.__call__(name)])
+    def value(self, name):
+        """Return list of single values for each stored NexusLoader"""
+        return [loader.value(name) for loader in self.loaders]
 
-    def create_matrix(self, scannable):
-        """Return nxm matrix from scannables, where n is the number of scans and m is the shortest scan length"""
-        # Get values
-        values = self.__call__(scannable)
-        # Determine shortest non-single array
-        lenval = np.min([np.asarray(val).size for val in values if np.asarray(val).size > 1])
-        # Create array
-        return np.array([val[:lenval] for val in values if val.size > 1])
+    def data_dict(self, name, label='filename'):
+        """Return dict of data for each scan, each entry is named loader(label)"""
+        return {loader(label): loader.data(name) for loader in self.loaders}
 
-    def title(self):
-        """Return plot title"""
-        return '%s-%s' % (self.scan_range[0], self.scan_range[-1])
-
-    def plot_line(self, axes=None, yaxis=None, xaxis=None, *args, **kwargs):
-        """plot metadata"""
-        if axes is None:
-            axes = plt.gca()
-        if xaxis is None and self._variables is None:
-            xaxis = self.scan_range
-        elif xaxis is None:
-            xaxis = self._variables[0]
-        if yaxis is None:
-            yaxis = 'np.sum(signal)'
-
-        xarray = self.create_array(xaxis)
-        yarray = self.create_array(yaxis)
-        lines = axes.plot(xarray, yarray, *args, **kwargs)
-        return lines
-
-    def plot_lines(self, axes=None, xaxis='axes', yaxis='signal', labels=None, *args, **kwargs):
-        """Plot line on given axis"""
-        if axes is None:
-            axis = plt.gca()
-        lines = []
-        for loader in self.loaders:
-            lines += loader.plot_line(axes, xaxis, yaxis, *args, label=labels, **kwargs)
-        return lines
-
-    def plot(self, xaxis='axes', yaxis='signal', labels=None, *args, **kwargs):
-        """Create plot of scan data"""
-
-        fig, ax = plt.subplots(figsize=fn.FIG_SIZE, dpi=fn.FIG_DPI)
-        lines = self.plot_lines(ax, xaxis, yaxis, labels, *args, **kwargs)
-
-        plt.title(self.title())
-        plt.xlabel(xaxis)
-        plt.ylabel(yaxis)
-        plt.legend()
-
-    def plot_value(self, yaxis=None, xaxis=None, *args, **kwargs):
-        """Create plot of metadata"""
-
-        if xaxis is None and self._variables is None:
-            xaxis = 'scanno'
-        elif xaxis is None:
-            xaxis = self._variables[0]
-        if yaxis is None:
-            yaxis = 'np.sum(signal)'
-
-        xarray = self.create_array(xaxis)
-        yarray = self.create_array(yaxis)
-
-        fig, ax = plt.subplots(figsize=fn.FIG_SIZE, dpi=fn.FIG_DPI)
-        lines = ax.plot(xarray, yarray, *args, **kwargs)
-
-        plt.title(self.title())
-        plt.xlabel(xaxis)
-        plt.ylabel(yaxis)
+    def dataframe(self, name, label='filename'):
+        """Return Pandas DataFrame of data in each loader"""
+        data = self.data_dict(name, label)
+        return fn.DataFrame(data)
 
     def new_roi(self, cen_h=None, cen_v=None, wid_h=31, wid_v=31, name=None):
         """Create new roi and add to the namespace"""
@@ -633,28 +625,3 @@ class NexusMultiReLoader:
         for loader in self.loaders:
             loader.new_roi(cen_h, cen_v, wid_h, wid_v, name)
 
-    def fit(self, xaxis='axes', yaxis='signal', yerrors=None, fit_type=None, print_result=True, plot_result=False):
-        """
-        Automatic fitting of scans
-
-        Use LMFit
-        Pass fit_type = LMFit model
-        return LMFit output
-        """
-
-        fit_result = []
-        for loader in self.loaders:
-            fit_result += [loader.fit(xaxis, yaxis, yerrors, fit_type, print_result, plot_result)]
-        return fit_result
-
-    def fit_result(self, parameter_name=None):
-        """Returns parameter, error from the last run fit"""
-
-        if parameter_name is None:
-            return [loader.fit_result() for loader in self.loaders]
-
-        values = np.zeros(len(self.loaders))
-        errors = np.zeros(len(self.loaders))
-        for n, scan in enumerate(self.loaders):
-            values[n], errors[n] = scan.fit_result(parameter_name)
-        return values, errors

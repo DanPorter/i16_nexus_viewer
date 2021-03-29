@@ -2,32 +2,25 @@
 Define the Scan object
 """
 
-import sys, os
 import numpy as np
-import h5py
-import matplotlib.pyplot as plt
-from pandas import DataFrame
 
-from .functions_general import array_str
-from .functions_nexus import scanfile2number, dataset_addresses, Hdf5Nexus
-from .nexus_decorator import DatasetPlus
+from . import MATPLOTLIB_PLOTTING
+from . import functions_nexus as fn
+from .nexus_loader import NexusLoader, NexusMultiLoader
 from .fitting import peakfit
 
 
-_namespace_modules = {
-    'np': np,
-    'sum': np.sum,
-    'max': np.max,
-    'mean': np.mean
-}
+"----------------------------------------------------------------------------------------------------------------------"
+"------------------------------------------------ Scan ----------------------------------------------------------------"
+"----------------------------------------------------------------------------------------------------------------------"
 
 
-class Scan(Hdf5Nexus):
+class Scan(NexusLoader):
     """
     Scan Class
     Loads a Nexus (.nxs) scan file and reads standard parameters into an internal namespace. Also contains useful
     automatic functions for images, regions of interest and fitting.
-    Inherits Hdf5Nexus, h5py.File
+    Inherits NexusLoader
 
     Usage:
       scan = Scan('/path/to/file/12345.nxs')
@@ -42,368 +35,221 @@ class Scan(Hdf5Nexus):
       scan('np.max(roi2_sum)') # evaluates operations
     Inputs:
     :param filename: str : path to scan file
-    :param string_address: str or list of str : addresses of string parameters to add to namespace
-    :param array_address: str or list of str : addresses of array parameters to add to namespace
-    :param value_address: str or list of str : addresses of string parameters to add to namespace
+    :param experiment: Experiment object
     """
 
-    _xaxis = None
-    _xaddress = None
-    _yaxis = None
-    _yaddress = None
-    _label_format = '%s: %s'
-    _image_address = None
-    _image_size = None
+    def __init__(self, filename, experiment=None, updatemode=False):
+        self.experiment = experiment
+        self.instrument = experiment.instrument if experiment else None
+        address_list = experiment.dataset_addresses if experiment and not updatemode else None
+        super().__init__(filename, address_list, updatemode)
 
-    _normalisation_names = ['sum', 'maxval', 'roi2_sum', 'roi1_sum']
-    _normalisation_command = '%s/Transmission/count_time'
-    _error_names = [('sum', 'roi2_sum', 'roi1_sum')]
-    _error_functions = ['np.sqrt(%s+1)']
-    _duplicate_namespace_names = {
-        'en': 'energy',  # old, new
-        'Ta': 'temp',
-    }
+        # scan defaults
+        self.scanno = fn.scanfile2number(filename)
+        self._scan_command = None
+        self._default_address = fn.DEFAULTS
+        if experiment:
+            self._default_address.update(experiment._defaults)
 
-    _plot_errors = False
-    _plot_normalise = True
-
-    _fit_model = None
-    _fit_guess = None
-    _fit_result = None
-
-    def __init__(self, filename,
-                 string_address='/entry1',
-                 array_address='/entry1/measurement',
-                 value_address='/entry1/before_scan'):
-        super().__init__(filename, 'r')  # load thef file as h5py.File type with Hdf5Nexus extensions
-
-        self.scan_number = scanfile2number(filename)
-
-        self._string_address_list = dataset_addresses(self, string_address, 1)
-        self.strings = [os.path.basename(address) for address in self._string_address_list]
-        self._string_items = {}
-        for address, name in zip(self._string_address_list, self.strings):
-            self._string_items[name] = DatasetPlus(self, address)
-
-        self._array_address_list = dataset_addresses(self, array_address)
-        self.arrays = [os.path.basename(address) for address in self._array_address_list]
-        self._array_items = {}
-        for address, name in zip(self._array_address_list, self.arrays):
-            self._array_items[name] = DatasetPlus(self, address)
-
-        self._value_address_list = dataset_addresses(self, value_address)
-        self.values = [os.path.basename(address) for address in self._value_address_list]
-        self._value_items = {}
-        for address, name in zip(self._value_address_list, self.values):
-            self._value_items[name] = DatasetPlus(self, address)
-
-        # Create namespace
-        self._namespace = _namespace_modules.copy()
-        self._namespace.update(self._string_items)
-        self._namespace.update(self._value_items)
-        self._namespace.update(self._array_items)
-        # duplicate namespace values (en==energy)
-        for old_name, new_name in self._duplicate_namespace_names.items():
-            if old_name in self._namespace.keys():
-                self._namespace[new_name] = self._namespace[old_name]
-        # update attributes
-        self.__dict__.update(self._string_items)
-        self.__dict__.update(self._array_items)
-
-    def __call__(self, source):
-        if self._xaxis is None:
-            self.xaxis()
-        if self._yaxis is None:
-            self.yaxis()
-        return eval(source, self._namespace)
-
-    def getvalue(self, source):
-        """Return the actual value, rather than dataset"""
-        value = self.__call__(source)
-        if ',' in source:
-            value = tuple(val[()] for val in value)
-        elif isinstance(value, h5py.Dataset):
-            value = value[()]
-        return value
+        # scan command
+        self.scan_command()
+        # auto xy data
+        self.auto_xyaxis()
 
     def __repr__(self):
-        return "Scan('%s')" % self.filename
+        return 'Scan(%s, cmd=%s)' % (self.scanno, self.scan_command())
 
     def __str__(self):
-        """Return string of scan information, with config attributes"""
-        fmt = '%20s : %s\n'
-        out_str = '=====Scan(%s)=====\n' % self.scan_number
-        out_str += fmt % ('scan number', self.scan_number)
-        out_str += fmt % ('filename', self.filename)
-        if self._namespace:
-            # initialise x,y axis
-            xdata = self.xaxis()
-            ydata = self.yaxis()
-            out_str += fmt % ('x-axis (axes)', self._xaxis)
-            out_str += fmt % ('y-axis (signal)', self._yaxis)
-            out_str += fmt % ('array length', len(xdata))
-        out_str += '-String values-\n'
-        for name, value in self._string_items.items():
-            out_str += fmt % (name, value)
-        return out_str
-
-    def info(self):
-        """Return longer string with full config attributres"""
-        fmt = '%20s : %s\n'
-        out_str = self.__str__()
-        out_str += '-Arrays-\n'
-        for name, value in self._array_items.items():
-            out_str += fmt % (name, array_str(value[:]))
-        out_str += '-Values-\n'
-        for name, value in self._value_items.items():
-            out_str += fmt % (name, value)
-        return out_str
-
-    def info_line(self, name=None):
-        """Return single line string with scan details"""
-        out = '%d axes=%s, signal=%s' % (self.scan_number, self.xaxis().basename, self.yaxis().basename)
-        if name is not None:
-            out += ', %s=%s' % (name, self.getvalue(name))
+        out = '%s\n' % (fn.OUTPUT_FORMAT % ('Scan Number', self.scanno))
+        out += '%s\n' % (fn.OUTPUT_FORMAT % ('cmd', self.scan_command()))
+        if self._axes_address is not None and self._signal_address is not None:
+            axes, signal = self.auto_xyaxis()
+            out += '%s\n' % (fn.OUTPUT_FORMAT % ('axes', axes))
+            out += '%s\n' % (fn.OUTPUT_FORMAT % ('signal', signal))
+        out += '%s\n' % (fn.OUTPUT_FORMAT % ('Duration', self.duration()))
+        if self.experiment:
+            data_addresses = self.addresses(self._default_address['scan_addresses'])
+            s = '\n'.join('%20s : {%s}' % (fn.address_name(a), a) for a in data_addresses)
+            out += self.string_operation(s)
+        else:
+            top_addresses = self.addresses(recursion_limit=2)
+            s = '\n'.join('%20s : {%s}' % (fn.address_name(a), a) for a in top_addresses)
+            out += self.string_operation(s)
         return out
 
     def __add__(self, addee):
         """
         Add two scans together somehow
         """
-        return MultiScans([self, addee])
+        return MultiScan([self, addee])
 
-    def who(self):
+    def defaults(self, **kwargs):
+        """Set or display the experiment default parameters"""
+        if len(kwargs) == 0:
+            df = self._default_address
+            if self.experiment:
+                dh = self.experiment._defaults_help
+            else:
+                dh = fn.DEFAULTS_HELP
+            return fn.defaults_help(df, dh)
+        self._default_address.update(kwargs)
+
+    def scan_number(self):
+        """Return the scan number from the current file"""
+        with fn.load(self.filename) as hdf:
+            try:
+                scanno = fn.scannumber(hdf)
+            except ValueError:
+                scanno = 0
+        return scanno
+
+    def scan_command(self, command_address=None):
         """
-        Return a string detailing the occupation of the namespace
+        Return scan command
+        :param command_address: None for automatic or str name or address
         :return: str
         """
-        out = ''
-        for item, value in self._namespace.items():
-            out += '%30s : %r\n' % (item, value)
-        return out
+        if command_address is None:
+            if self._scan_command is not None:
+                return self._scan_command
+            command_address = self._default_address['cmd']
+        command_command = "{%s}" % command_address
+        cmd = self.string_operation(command_command, shorten=True)
+        self._scan_command = cmd
+        self.add_to_namespace(cmd=cmd)
+        return cmd
 
-    def add2namespace(self, data_dict):
+    def duration(self, start_address=None, end_address=None):
         """
-        Add additional parameters to scan namespace
-        :param data_dict: dict
-        :return: None
+        Determine the duration of a scan using the start_time and end_time datasets
+        :param start_address: address or name of start time dataset
+        :param end_address: address or name of end time dataset
+        :return: datetime.timedelta
         """
-        self._namespace.update(data_dict)
+        if start_address is None:
+            start_address = self._default_address['start_time']
+        if end_address is None:
+            end_address = self._default_address['end_time']
+        with fn.load(self.filename) as hdf:
+            timedelta = fn.duration(hdf, start_address, end_address, self._address_list)
+        return timedelta
 
-    def xaxis(self, name=None, address=None):
+    def title(self, title_command=None):
         """
-        Return the dataset of the default axes value *the independent variable to plot on the abscissa*
-        :param name: None or str : name of array from namespace
-        :param address: None or str : dataset address in hdf5 file
-        :return: DatasetPlus
-        """
-        if name and name in self.arrays:
-            self._xaxis = name
-            self._xaddress = self._array_items[name].address
-        elif address:
-            self._xaddress = address
-            self._xaxis = os.path.basename(self._xaddress)
-        if self._xaxis is None:
-            axes = self.nx_find_attr('axes')
-            if not axes or len(axes) < 1:
-                axes = [self.get(self._array_address_list[0])]
-                print('Warning: attribute "axes" not found, defaulting to %s' % axes[0])
-            self._xaddress = axes[0]
-            self._xaxis = os.path.basename(self._xaddress)
-        dataset = DatasetPlus(self, self._xaddress)
-        # add to namespace
-        data_dict = {'xaxis': dataset,
-                     'axes': dataset}
-        self.add2namespace(data_dict)
-        return dataset
-
-    def yaxis(self, name=None, address=None):
-        """
-        Return the address of the default signal value *the dependent variable to plot on the ordinate*
-        :param name: None or str : name of array from namespace
-        :param address: None or str : dataset address in hdf5 file
-        :return: DatasetPlus
-        """
-        if name and name in self.arrays:
-            self._yaxis = name
-            self._yaddress = self._array_items[name].address
-        elif address:
-            self._yaddress = address
-            self._yaxis = os.path.basename(self._yaddress)
-        if self._yaxis is None:
-            signal = self.nx_find_attr('signal')
-            if not signal or len(signal) < 1:
-                signal = [self.get(self._array_address_list[-1])]
-                print('Warning: attribute "signal" not found, defaulting to %s' % signal[0])
-            self._yaddress = signal[0]
-            self._yaxis = os.path.basename(self._yaddress)
-        dataset = DatasetPlus(self, self._yaddress)
-        # add to namespace
-        data_dict = {'yaxis': dataset,
-                     'signal': dataset}
-        self.add2namespace(data_dict)
-        return dataset
-
-    def dataframe(self):
-        """Return a pandas dataframe of the array data in this scan"""
-        return DataFrame(self._array_items)
-
-    def _error(self, name='signal'):
-        """Return error on name if required"""
-        for names, cmd in zip(self._error_names, self._error_functions):
-            if name in names:
-                err = cmd % name
-                if self._plot_normalise:
-                    err = self._normalise_name(err)
-                return self.__call__(err)
-        return 0 * self.__call__(name)
-
-    def _normalise(self, name='signal'):
-        """Return normalised value"""
-        return self.__call__(self._normalise_name(name))
-
-    def _normalise_name(self, name):
-        """Return normalised value"""
-        if name in self._normalisation_names:
-            return self._normalisation_command % name
-        return name
-
-    def scan_title(self):
-        """
-        Return str scan_title for plot
+        Generate scan title
+        :param title_command: str command e.g. 'title: {entry1/title}'
         :return: str
         """
-        if 'title' in self._string_items:
-            return '%r\n%s' % (self, self.__call__('title'))
-        return self.__repr__()
+        if title_command is None:
+            title_command = self._default_address['title_command']
+        return fn.shortstr(self.string_operation(title_command))
 
-    def label(self, name, output_format=None):
+    def label(self, label_command=None):
         """
-        Return formatted string of stored value. First attempts retreival from metadata namepace, then general namespace,
-        then attemps to get value from nexus
+        Generate scan title
+        :param label_command: str command e.g. '#{scanno}'
+        :return: str
         """
-        value = self.__call__(name)
-        if output_format is None:
-            output_format = self._label_format
-        return output_format % (name, value)
+        if label_command is None:
+            label_command = self._default_address['label_command']
+        return fn.shortstr(self.string_operation(label_command))
 
-    def image_data(self, index=None, image_address=None):
-        """Returns image data as 2D array"""
-        if image_address:
-            self._image_address = image_address
-        if self._image_address is None:
-            self._image_address = self.nx_find_image()
-        return self.nx_image_data(index, self._image_address)
+    def get_scan_addresses(self, scan_addresses=None):
+        """
+        Returns a list of addresses of scan values, each scan value is an array
+        :param scan_addresses: str address of group or list of str addresses
+        :return: list
+        """
+        if scan_addresses is None:
+            scan_addresses = self._default_address['scan_addresses']
+        return self.addresses(scan_addresses)
 
-    def image_size(self, image_address=None):
-        """Return size of a single data image"""
-        if self._image_size:
-            return self._image_size
-        if image_address:
-            self._image_address = image_address
-        elif self._image_address is None:
-            self._image_address = self.nx_find_image()
-        self._image_size = self.image_data(0, self._image_address).shape
-        return self._image_size
+    def get_scan_names(self, scan_addresses=None):
+        """
+        Returns a list of names of scan values, each scan value is an array
+        :param scan_addresses: str address of group or list of str addresses
+        :return: list
+        """
+        addresses = self.get_scan_addresses(scan_addresses)
+        return [fn.address_name(address) for address in addresses]
 
-    def plot_options(self, normalise=None, errors=None):
-        """Adjust plot options"""
-        if normalise is not None:
-            self._plot_normalise = normalise
-        if errors is not None:
-            self._plot_errors = errors
+    def dataframe(self, scan_addresses=None):
+        """
+        returns Pandas.DataFrame of scan data
+        :param scan_addresses: str address of group or list of str addresses
+        :return: Pandas.DataFrame
+        """
+        if scan_addresses is None:
+            scan_addresses = self._default_address['scan_addresses']
+        # expand names and groups to dataset addresses
+        return super().dataframe(scan_addresses)
 
-    def plotline(self, axis=None, xaxis='axes', yaxis='signal', *args, label=None, **kwargs):
-        """Plot line on given axis"""
-        # Tranpose arrays if data is multidimensional
-        if axis is None:
-            axis = plt.gca()
-        xarray = np.array(self.__call__(xaxis)).T
-        if self._plot_normalise:
-            yarray = np.array(self._normalise(yaxis)).T
+    def arrays(self, scan_addresses=None, scan_length=None):
+        """
+        array of same length arrays of scan data
+        :param scan_addresses: str address of group or list of str addresses
+        :param scan_length: int or None length of data arrays
+        :return: array
+        """
+        if scan_addresses is None:
+            scan_addresses = self._default_address['scan_addresses']
+        if scan_length is None:
+            scan_length = self.data(self._default_address['scan_length'])
+        # expand names and groups to dataset addresses
+        return self.array_data(scan_addresses, scan_length)
+
+    def metadata(self, name=None):
+        """Return a value of the metadata or a metadata dict"""
+        if name:
+            return self.value(name)
+        meta_address = self._default_address['meta_addresses']
+        return self.group_values(meta_address)
+
+    def normalise(self, name, norm_command=None):
+        """Normalise named data"""
+        if norm_command is None:
+            norm_command = self._default_address['normalisation_command']
+        operation = norm_command % name
+        return self.get_operation(operation)
+
+    def error(self, name, error_command=None):
+        """Calcualte uncertainty on values"""
+        if error_command is None:
+            error_command = self._default_address['error_command']
+        operation = error_command % name
+        return self.get_operation(operation)
+
+    def auto_data(self, name):
+        """
+        Automatically normalises and calculates error on data
+        :param name: str dataset name or address
+        :return: str(name), str(error_name), array(data), array(error)
+        """
+        op, data = self.get_operation(name)
+
+        if op in self._default_address['error_names']:
+            op_err, error = self.error(op)
         else:
-            yarray = np.array(self.__call__(yaxis)).T
-        if label:
-            label_str = self.label(label)
-        else:
-            label_str = yaxis
+            op_err, error = '', np.zeros(np.shape(data))
 
-        if self._plot_errors:
-            yerror = self._error(yaxis)
-            lines = axis.errorbar(xarray, yarray, yerror, *args, label=label_str, **kwargs)
-        else:
-            lines = axis.plot(xarray, yarray, *args, label=label_str, **kwargs)
-        return lines
+        if op in self._default_address['normalisation_names']:
+            op, data = self.normalise(name)
+            op_err, error = self.normalise(op_err)
+        return op, op_err, data, error
 
-    def plot(self, xaxis='axes', yaxis='signal', *args, **kwargs):
-        """Create plot"""
+    def auto_xyaxis(self, address='/', cmd_string=None):
+        """
+        Find default axes, signal hdf addresses using 'axes', 'signal' attributes, or from scan command
+        :param address: str addtress to start in
+        :param cmd_string: str of command to take x,y axis from as backup
+        :return: xaxis_address, yaxis_address
+        """
+        # Note: this doesn't overwrite the use of the method in super().address
+        if cmd_string is None:
+            cmd_string = self.scan_command()
+        return super().auto_xyaxis(address, cmd_string)
 
-        xdataset = self.__call__(xaxis)
-        ydataset = self.__call__(yaxis)
-        if hasattr(xdataset, 'basename'):
-            xaxis = xdataset.basename
-        if hasattr(ydataset, 'basename'):
-            yaxis = ydataset.basename
-
-        plt.figure()
-        ax = plt.subplot(111)
-        lines = self.plotline(ax, xaxis, yaxis, *args, **kwargs)
-
-        if self._plot_normalise:
-            yaxis = self._normalise_name(yaxis)
-
-        plt.title(self.scan_title())
-        plt.xlabel(xaxis)
-        plt.ylabel(yaxis)
-        plt.legend(yaxis.split(','))
-
-    def plot_image(self, index, image_address=None):
-        """Plot detector image"""
-
-        plt.figure()
-        ax = plt.subplot(111)
-
-        im = self.image_data(index, image_address)
-        ax.pcolormesh(im, shading='gouraud')
-
-        plt.axis('image')
-        plt.title(self.scan_title())
-
-    def new_roi(self, cen_h=None, cen_v=None, wid_h=31, wid_v=31, name=None):
-        """Create new roi and add to the namespace"""
-
-        if name is None:
-            name = 'roi'
-
-        if cen_h is None:
-            cen_h = self.image_size()[1] // 2
-        if cen_v is None:
-            cen_v = self.image_size()[0] // 2
-
-        array_length = len(self.xaxis())
-
-        roi_size = (cen_h, cen_v, wid_h, wid_v)
-        roi_sum = np.zeros(array_length)
-        roi_maxval = np.zeros(array_length)
-        for n in range(array_length):
-            image = self.image_data(n)
-            roi = image[cen_v - wid_v // 2:cen_v + wid_v // 2, cen_h - wid_h // 2:cen_h + wid_h // 2]
-            roi_sum[n] = np.sum(roi)
-            roi_maxval[n] = np.max(roi)
-
-        name_size = '%s_size' % name
-        name_sum = '%s_sum' % name
-        name_maxval = '%s_maxval' % name
-        n = 1
-        while name_sum in self._namespace.keys():
-            name_size = '%s%d_size' % (name, n)
-            name_sum = '%s%d_sum' % (name, n)
-            name_maxval = '%s%d_maxval' % (name, n)
-            n += 1
-        self._namespace[name_size] = roi_size
-        self._namespace[name_sum] = roi_sum
-        self._namespace[name_maxval] = roi_maxval
-        print('Added new ROI to namespace: %s, %s and %s' % (name_size, name_sum, name_maxval))
+    "------------------------------- fitting -------------------------------------------"
 
     def fit(self, xaxis='axes', yaxis='signal', yerrors=None, fit_type=None, print_result=True, plot_result=False):
         """
@@ -414,186 +260,172 @@ class Scan(Hdf5Nexus):
         return LMFit output
         """
 
-        xdataset = self.__call__(xaxis)
-        ydataset = self.__call__(yaxis)
-
-        if hasattr(xdataset, 'basename'):
-            xaxis = xdataset.basename
-        if hasattr(ydataset, 'basename'):
-            yaxis = ydataset.basename
-
-        yerror = self._error(yaxis)
-        if self._plot_normalise:
-            yaxis = self._normalise_name(yaxis)
-            ydataset = self.__call__(yaxis)
+        xname, xdata = self.get_operation(xaxis)
+        yname, ydata = self.get_operation(yaxis)
+        if yerrors:
+            error_name, error_data = self.get_operation(yerrors)
 
         # lmfit
-        out = peakfit(xdataset, ydataset)
+        out = peakfit(xdata, ydata)
 
-        # add to namespace
-        self._fit_guess = None
-        self._fit_model = None
-        self._fit_result = out
+        self._lmfit = out
         fit_dict = {}
         for pname, param in out.params.items():
             ename = 'stderr_' + pname
             fit_dict[pname] = param.value
             fit_dict[ename] = param.stderr
-            self.add2namespace(fit_dict)
+        self.fit_results.update(fit_dict)
 
         if print_result:
-            print(self.scan_title())
+            print(self.title())
             print(out.fit_report())
         if plot_result:
             fig, grid = out.plot()
-            plt.suptitle(self.scan_title(), fontsize=12)
-            plt.subplots_adjust(top=0.85, left=0.15)
+            #plt.suptitle(self.title(), fontsize=12)
+            #plt.subplots_adjust(top=0.85, left=0.15)
             ax1, ax2 = fig.axes
-            ax2.set_xlabel(xaxis)
-            ax2.set_ylabel(yaxis)
+            ax2.set_xlabel(xname)
+            ax2.set_ylabel(yname)
         return out
 
     def fit_result(self, parameter_name=None):
         """Returns parameter, error from the last run fit"""
-        if self._fit_result is None:
+        if self._lmfit is None:
             self.fit()
         if parameter_name is None:
-            return self._fit_result
-        param = self._fit_result.params[parameter_name]
+            return self._lmfit
+        param = self._lmfit.params[parameter_name]
         return param.value, param.stderr
 
 
-class MultiScans:
-    """
-        MultiScan class, container for a number of Scan objects.
-    """
-    def __init__(self, scans, variable=None):
-        self._scans = scans
-        self._first_scan = scans[0]
-        self._variable = variable
+"----------------------------------------------------------------------------------------------------------------------"
+"---------------------------------------------- MultiScan -------------------------------------------------------------"
+"----------------------------------------------------------------------------------------------------------------------"
 
-        self.scan_numbers = [scan.scan_number for scan in self._scans]
-        self.scan_range = list(range(len(self._scans)))
 
-        for n, scan in enumerate(scans):
-            setattr(self, 'd%d' % n, scan)
+class MultiScan(NexusMultiLoader):
+    """
+    MultiScan - container for multiple Scan objects
+    e.g.
+    d1 = Scan("file1.nxs")
+    d2 = Scan("file2.nxs")
+    group = MultiScan([d1, d2])
+
+    The same can be achieved by adding NexusLoader objects:
+    group = d1 + d2
+
+    Additional parameters (can also be set by self.param(value)):
+    :param loaders: list of NexusLoader objects
+    :param axes: default axis of each Loader
+    :param signal: default signal of each loader
+    :param variables: str or list of str values that change in each file
+    :param shape: tuple shape of data, allowing for multiple dimesion arrays (nLoaders, scany, scanx)
+    """
+    def __init__(self, loaders, axes='axes', signal='signal', variables=None, shape=None):
+        super().__init__(loaders)
+        self._axes = axes
+        self._signal = signal
+        self._variables = None if variables is None else np.asarray(variables, dtype=str).reshape(-1)
+        if shape is None:
+            self._shape = (len(loaders),)
+        else:
+            self._shape = shape
 
     def __repr__(self):
-        return "MultiScans(%s)" % self.scan_numbers
+        return "MultiScan(%d files)" % len(self.loaders)
 
     def __str__(self):
-        return '\n'.join(['%r' % scan for scan in self._scans])
-
-    def __call__(self, name):
-        out = []
-        for scan in self._scans:
-            out += [scan.__call__(name)]
-        return out
+        variables = self.variables()
+        if variables is not None:
+            out = ''
+            for loader in self.loaders:
+                vstr = ', '.join('%s={%s}' % (v, v) for v in variables)
+                out += '%r: %s\n' % (loader, loader.string_operation(vstr))
+            return out
+        return '\n'.join(['%r' % loader for loader in self.loaders])
 
     def __add__(self, addee):
-        return MultiScans(self._scans + [addee])
+        new_shape = (len(self.loaders) + 1,)
+        return MultiScan(self.loaders + [addee], self._axes, self._signal, self._variables, new_shape)
 
-    def __getitem__(self, key):
-        out_list = []
-        for scan in self._scans:
-            out_list += [scan.get(key)]
-        return out_list
+    def __radd__(self, addee):
+        new_shape = (len(self.loaders) + 1,)
+        return MultiScan([addee] + self.loaders, self._axes, self._signal, self._variables, new_shape)
 
-    def get(self, key):
-        return self.__getitem__(key)
-
-    def set_variable(self, name):
-        """Set default variable that changes with each scan"""
-        self._variable = name
-
-    def info(self, name=None):
-        """Return str of name values"""
-        if name is None and self._variable is None:
-            return '\n'.join('%d' % scn for scn in self.scan_numbers)
-        elif name is None:
-            name = self._variable
-        return '\n'.join(scan.info_line(name) for scan in self._scans)
-
-    def create_array(self, name):
-        """Return numerical array from values"""
-        return np.array([np.asarray(val) for val in self.__call__(name)])
-
-    def create_matrix(self, scannable):
-        """Return nxm matrix from scannables, where n is the number of scans and m is the shortest scan length"""
-        # Get values
-        values = self.__call__(scannable)
-        # Determine shortest non-single array
-        lenval = np.min([np.asarray(val).size for val in values if np.asarray(val).size > 1])
-        # Create array
-        return np.array([val[:lenval] for val in values if val.size > 1])
-
-    def title(self):
-        """Return plot title"""
-        return '%s-%s' % (self.scan_numbers[0], self.scan_numbers[-1])
-
-    def plotline(self, axis=None, xaxis=None, yaxis=None, *args, **kwargs):
-        """plot metadata"""
-        if axis is None:
-            axis = plt.gca()
-        if xaxis is None and self._variable is None:
-            xaxis = self.scan_range
-        elif xaxis is None:
-            xaxis = self._variable
-        if yaxis is None:
-            yaxis = 'np.sum(%s)' % self._first_scan.yaxis()
-
-        xarray = self.create_array(xaxis)
-        yarray = self.create_array(yaxis)
-        lines = axis.plot(xarray, yarray, *args, **kwargs)
-        return lines
-
-    def plotlines(self, axis=None, xaxis=None, yaxis=None, labels=None, *args, **kwargs):
-        """Plot line on given axis"""
-        if axis is None:
-            axis = plt.gca()
-        lines = []
-        for scan in self._scans:
-            lines += scan._plotline(axis, xaxis, yaxis, *args, label=labels, **kwargs)
-        return lines
-
-    def plot(self, xaxis=None, yaxis=None, labels=None, *args, **kwargs):
-        """Create plot"""
-
-        plt.figure()
-        ax = plt.subplot(111)
-        lines = self.plotlines(ax, xaxis, yaxis, labels, *args, **kwargs)
-
-        if self._first_scan._plot_normalise:
-            y = self._first_scan._normalise_name(yaxis)
-        plt.title(self.title())
-        plt.xlabel(xaxis)
-        plt.ylabel(yaxis)
-        plt.legend()
-
-    def plot_value(self, xaxis=None, yaxis=None, *args, **kwargs):
-        """Create plot"""
-
-        plt.figure()
-        ax = plt.subplot(111)
-        lines = self.plotline(ax, xaxis, yaxis, *args, **kwargs)
-
-        plt.title(self.title())
-        plt.xlabel(xaxis)
-        plt.ylabel(yaxis)
-
-    def new_roi(self, cen_h=None, cen_v=None, wid_h=31, wid_v=31, name=None):
-        """Create new roi and add to the namespace"""
-
+    def axes(self, name=None):
+        """Set or return default axes name"""
         if name is None:
-            name = 'roi'
+            return self._axes
+        self._axes = name
 
-        if cen_h is None:
-            cen_h = self._first_scan.image_size()[1] // 2
-        if cen_v is None:
-            cen_v = self._first_scan.image_size()[0] // 2
+    def signal(self, name=None):
+        """Set or return default signal name"""
+        if name is None:
+            return self._signal
+        self._signal = name
 
-        for scan in self._scans:
-            scan.new_roi(cen_h, cen_v, wid_h, wid_v, name)
+    def variables(self, names=None):
+        """Set or return default variable that changes with each scan"""
+        if names is None:
+            return self._variables
+        self._variables = np.asarray(names, dtype=str).reshape(-1)
+
+    def add_variable(self, names):
+        """Add a variable name to the list"""
+        self._variables = np.append(self._variables, names)
+
+    def shape(self, split_repeat=None):
+        """Set or return expected shape of output array"""
+        if split_repeat is None:
+            return self._shape
+
+        if split_repeat == 1:
+            self._shape = (len(self.loaders), )
+        else:
+            self._shape = (len(self.loaders)//split_repeat, split_repeat)
+
+    def array(self, name, data_length=None):
+        """Return numerical array from values, defaults to the shortest length"""
+        data = self.__call__(name)
+
+        if data_length is None:
+            data_length = self._shape[-1] if len(self._shape) > 1 else np.max([np.size(d) for d in data])
+
+        # shorten or fill arrays
+        out = np.nan * np.zeros([len(data), data_length])
+        for n, d in enumerate(data):
+            if np.size(d) == 1:
+                out[n, :] = d
+            elif np.size(d) >= data_length:
+                out[n, :] = d[:data_length]
+            else:
+                out[n, :len(d)] = d
+        return out
+
+    def meshdata(self, xname, yname, signal, repeat=None):
+        """Create meshgrid of 2 variables"""
+        xdata = np.array(self.value(xname))
+        ydata = np.array(self.value(yname))
+        data = np.array(self.value(signal))
+
+        if repeat is None:
+            # Determine the repeat length of the scans
+            delta_x = np.abs(np.diff(xdata))
+            ch_idx_x = np.where(delta_x > delta_x.max() * 0.9)  # find biggest changes
+            ch_delta_x = np.diff(ch_idx_x)
+            rep_len_x = np.round(np.mean(ch_delta_x))
+            delta_y = np.abs(np.diff(ydata))
+            ch_idx_y = np.where(delta_y > delta_y.max() * 0.9)  # find biggest changes
+            ch_delta_y = np.diff(ch_idx_y)
+            rep_len_y = np.round(np.mean(ch_delta_y))
+            print('Scans in {} are repeating every {} iterations'.format(xname, rep_len_x))
+            print('Scans in {} are repeating every {} iterations'.format(yname, rep_len_y))
+            repeat = int(max(rep_len_x, rep_len_y))
+
+        xsquare = xdata[:repeat * (len(xdata) // repeat)].reshape(-1, repeat)
+        ysquare = ydata[:repeat * (len(ydata) // repeat)].reshape(-1, repeat)
+        dsquare = data[:repeat * (len(data) // repeat)].reshape(-1, repeat)
+        return xsquare, ysquare, dsquare
 
     def fit(self, xaxis='axes', yaxis='signal', yerrors=None, fit_type=None, print_result=True, plot_result=False):
         """
@@ -605,18 +437,30 @@ class MultiScans:
         """
 
         fit_result = []
-        for scan in self._scans:
-            fit_result += [scan.fit(xaxis, yaxis, yerrors, fit_type, print_result, plot_result)]
+        for loader in self.loaders:
+            fit_result += [loader.fit(xaxis, yaxis, yerrors, fit_type, print_result, plot_result)]
         return fit_result
 
     def fit_result(self, parameter_name=None):
         """Returns parameter, error from the last run fit"""
 
         if parameter_name is None:
-            return [scan.fit_result() for scan in self._scans]
+            return [loader.fit_result() for loader in self.loaders]
 
-        values = np.zeros(len(self._scans))
-        errors = np.zeros(len(self._scans))
-        for n, scan in enumerate(self._scans):
+        values = np.zeros(len(self.loaders))
+        errors = np.zeros(len(self.loaders))
+        for n, scan in enumerate(self.loaders):
             values[n], errors[n] = scan.fit_result(parameter_name)
         return values, errors
+
+
+"----------------------------------------------------------------------------------------------------------------------"
+"---------------------------------------------- ADD PLOTTING ----------------------------------------------------------"
+"----------------------------------------------------------------------------------------------------------------------"
+
+
+if MATPLOTLIB_PLOTTING:
+    # Recast Scan, MultiScan with plotting
+    from .plotting_matplotlib import ScanPlotsMatplotlib, MultiScanPlotsMatplotlib
+    Scan = ScanPlotsMatplotlib
+    MultiScan = MultiScanPlotsMatplotlib
