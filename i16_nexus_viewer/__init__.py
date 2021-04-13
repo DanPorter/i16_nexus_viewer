@@ -35,8 +35,9 @@ Version History:
 
 import os
 import numpy as np
-from lmfit.models import GaussianModel, VoigtModel, LinearModel
 """
+from lmfit.models import GaussianModel, VoigtModel, LinearModel
+
 from .__settings__ import MATPLOTLIB_PLOTTING
 from .functions_nexus import load, reload, Hdf5Nexus
 from .nexus_loader import NexusLoader
