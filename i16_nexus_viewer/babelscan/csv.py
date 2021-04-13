@@ -5,7 +5,7 @@ Functions for reading .csv files
 import numpy as np
 
 from . import functions as fn
-from .omniscan import Scan
+from .babelscan import Scan
 
 
 "----------------------------LOAD FUNCTIONS---------------------------------"
@@ -56,7 +56,7 @@ def read_csv_file(filename):
 class CsvScan(Scan):
     """
     Scan for .csv files
-    Reads data into omniscan class, storing data in the internal namespace
+    Reads data into babelscan class, storing data in the internal namespace
     Scan data and metadata can be requested using the the name of the dataset (e.g. 'eta')
     Usage:
         d = DatScan('file.csv')

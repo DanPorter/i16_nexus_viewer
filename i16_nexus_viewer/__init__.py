@@ -30,20 +30,21 @@ Version History:
 15/11/20 0.2.0  nexus_loader added which reloads nexus file on every operation
 30/11/20 0.3.0  reformat functions_nexus and nexus_loader, add nroi
 29/03/21 0.4.0  currently working using nexus ReLoader
-13/04/21 0.5.0  Created omniscan scan wrapper, but nothing else works
+13/04/21 0.5.0  Created babelscan scan wrapper, but nothing else works
 """
 
 import os
 import numpy as np
 from lmfit.models import GaussianModel, VoigtModel, LinearModel
-
+"""
 from .__settings__ import MATPLOTLIB_PLOTTING
 from .functions_nexus import load, reload, Hdf5Nexus
 from .nexus_loader import NexusLoader
 from .nexus_scan import Scan, MultiScan
 from .nexus_experiment import Beamline, Experiment
 from .fitting import peakfit
-from .omniscan import file_loader, FolderMonitor
+"""
+from .babelscan import file_loader, FolderMonitor
 
 from . import functions_general as fg
 
@@ -52,7 +53,7 @@ __date__ = "13/04/2021"
 
 
 # Set up Beamline i16
-i16 = Beamline('i16')
+#i16 = Beamline('i16')
 
 
 def start_gui(experiment=None, config_filename=None):

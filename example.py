@@ -6,7 +6,6 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import i16_nexus_viewer as nv
-import i16_nexus_viewer.plotting_matplotlib as pm
 
 file = r"C:\Users\dgpor\Dropbox\Python\ExamplePeaks\810002.nxs"  # eta scan with pilatus
 cv_file = r"C:\Users\dgpor\Dropbox\Python\ExamplePeaks\857991.nxs"  # trajectory scan/ cvscan/ kthZebra
@@ -35,12 +34,13 @@ example_range = [r"C:\Users\dgpor\OneDrive - Diamond Light Source Ltd\I16\Nexus_
 
 #scan = exp.scan(0)
 
-from i16_nexus_viewer.scan_loader import Scan
-scan = Scan(file)
+from i16_nexus_viewer import file_loader
+scan = file_loader(file)
 print(scan)
 
 print(scan('eta'))
 scan.plot('axes', 'nroi[31,31]')
+scan.fit('axes', 'nroi[31,31]', plot_result=True)
 
 
 #print(output)

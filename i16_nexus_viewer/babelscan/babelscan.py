@@ -1,5 +1,5 @@
 """
-OmniScan object for holding many types of scan data
+babelscan object for holding many types of scan data
 """
 
 import numpy as np
@@ -8,7 +8,7 @@ from . import EVAL_MODE
 
 
 "----------------------------------------------------------------------------------------------------------------------"
-"--------------------------------------------- Scan -------------------------------------------------------------"
+"------------------------------------------------- Scan ---------------------------------------------------------------"
 "----------------------------------------------------------------------------------------------------------------------"
 
 
@@ -717,6 +717,145 @@ class Scan:
         n -= 1
         self.add2namespace('nroi%d_sum' % n, other_names=operation)
         return roi_sum, roi_max
+
+    "------------------------------- fitting -------------------------------------------"
+
+    def fit(self, xaxis='axes', yaxis='signal', fit_type=None, print_result=True, plot_result=False):
+        """
+        Automatic fitting of scan
+
+        Use LMFit
+        Pass fit_type = LMFit model
+        return LMFit output
+        """
+        from .fitting import peakfit
+        xdata, ydata, yerror, xname, yname = self.get_plot_data(xaxis, yaxis, None, None)
+
+        # lmfit
+        out = peakfit(xdata, ydata, yerror)
+
+        self.add2namespace('lmfit', out, 'fit_result')
+        fit_dict = {}
+        for pname, param in out.params.items():
+            ename = 'stderr_' + pname
+            fit_dict[pname] = param.value
+            fit_dict[ename] = param.stderr
+        self._namespace.update(fit_dict)
+        self.add2namespace('fit_%s' % yname, out.best_fit, other_names=['fit'])
+
+        if print_result:
+            print(self.title())
+            print(out.fit_report())
+        if plot_result:
+            fig, grid = out.plot()
+            # plt.suptitle(self.title(), fontsize=12)
+            # plt.subplots_adjust(top=0.85, left=0.15)
+            ax1, ax2 = fig.axes
+            ax2.set_xlabel(xname)
+            ax2.set_ylabel(yname)
+        return out
+
+    def fit_result(self, parameter_name=None):
+        """
+        Returns parameter, error from the last run fit
+        :param parameter_name: str, name from last fit e.g. 'amplitude', or None to return lmfit object
+        :param
+        :return:
+        """
+        if 'lmfit' not in self._namespace:
+            self.fit()
+        lmfit = self._get_data('lmfit')
+        if parameter_name is None:
+            return lmfit
+        param = lmfit.params[parameter_name]
+        return param.value, param.stderr
+
+    "------------------------------- plotting -------------------------------------------"
+
+    def plotline(self, xaxis='axes', yaxis='signal', *args, axes=None, **kwargs):
+        """
+        Plot scanned datasets on matplotlib axes subplot
+        :param xaxis: str name or address of array to plot on x axis
+        :param yaxis: str name or address of array to plot on y axis
+        :param args: given directly to plt.plot(..., *args, **kwars)
+        :param axes: matplotlib.axes subplot, or None to use plt.gca()
+        :param kwargs: given directly to plt.plot(..., *args, **kwars)
+        :return: list lines object, output of plot
+        """
+        pm = fn.init_plot()
+        xdata, ydata, yerror, xname, yname = self.get_plot_data(xaxis, yaxis, None, None)
+
+        if 'label' not in kwargs:
+            kwargs['label'] = self.label()
+        lines = pm.plot_line(axes, xdata, ydata, None, *args, **kwargs)
+        return lines
+
+    def plot(self, xaxis='axes', yaxis='signal', *args, axes=None, **kwargs):
+        """
+        Create matplotlib figure with plot of the scan
+        :param axes: matplotlib.axes subplot
+        :param xaxis: str name or address of array to plot on x axis
+        :param yaxis: str name or address of array to plot on y axis
+        :param args: given directly to plt.plot(..., *args, **kwars)
+        :param axes: matplotlib.axes subplot, or None to create a figure
+        :param kwargs: given directly to plt.plot(..., *args, **kwars)
+        :return: axes object
+        """
+        pm = fn.init_plot()
+        # Check for multiple inputs on yaxis
+        ylist = np.asarray(yaxis, dtype=str).reshape(-1)
+
+        # Create figure
+        if axes is None:
+            axes = pm.create_axes(subplot=111)
+
+        # x axis data
+        xname, xdata = self._get_name_data(xaxis)
+
+        # Add plots
+        ynames = []
+        for yaxis in ylist:
+            yname, ydata = self._get_name_data(yaxis)
+            ynames += [yname]
+            pm.plot_line(axes, xdata, ydata, None, *args, label=yname, **kwargs)
+
+        # Add labels
+        ttl = self.title()
+        ylabel = ', '.join(set(ynames))
+        pm.labels(ttl, xname, ylabel, legend=True)
+        return axes
+
+    def plot_detector(self, index=None, xaxis='axes', axes=None, clim=None, cmap=None, colorbar=False, **kwargs):
+        """
+        Plot detector image in matplotlib figure
+        :param index: int, detector image index, 0-length of scan, if None, use centre index
+        :param xaxis: name or address of xaxis dataset
+        :param axes: matplotlib axes to plot on (None to create figure)
+        :param clim: [min, max] colormap cut-offs (None for auto)
+        :param cmap: str colormap name (None for auto)
+        :param colorbar: False/ True add colorbar to plot
+        :param kwargs: additinoal arguments for plot_detector_image
+        :return: axes object
+        """
+        pm = fn.init_plot()
+        # x axis data
+        xname, xdata = self._get_name_data(xaxis)
+
+        # image data
+        if index is None:
+            index = len(xdata) // 2
+        im = self.image(index)
+
+        # Create figure
+        if axes is None:
+            axes = pm.create_axes(subplot=111)
+        pm.plot_detector_image(axes, im, **kwargs)
+
+        # labels
+        ttl = '%s\n%s [%d] = %s' % (self.title(), xname, index, xdata[index])
+        pm.labels(ttl, colorbar=colorbar, colorbar_label='Detector', axes=axes)
+        pm.colormap(clim, cmap, axes)
+        return axes
 
 
 "----------------------------------------------------------------------------------------------------------------------"

@@ -4,6 +4,7 @@ Fitting functions using lmfit
 
 import os, sys, time, glob
 import numpy as np
+import matplotlib.pyplot as plt
 from lmfit.models import GaussianModel, VoigtModel, LinearModel  # fitting models
 
 

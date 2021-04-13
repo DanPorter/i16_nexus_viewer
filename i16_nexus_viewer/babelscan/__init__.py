@@ -1,15 +1,18 @@
 """
-omniscan: generic object for reading scan files
+babelscan: a generic class for reading many types of scan data that you don't need to put in your ear.
 A generic class for reading data files from scan data
 
+requirements: numpy, h5py, imageio
+Optional requirements: matplotlib, lmfit
+
 Usage:
-  from omniscan import file_loader
+  from babelscan import file_loader
   scan1 = file_loader('some/file.nxs', **options)  # creates Scan class
   scan2 = file_loader('another/file.dat', **options)
   scans = scan1 + scan2  # creates MultiScan class
 
   # Folder monitor:
-  from omniscan import FolderMonitor
+  from babelscan import FolderMonitor
   mon = FolderMonitor('/some/folder', **options)
   scan = mon.scan(0)  # creates scan from latest file in folder
 
@@ -35,12 +38,14 @@ Scan class
     scan.image(idx)  # if available, returns detector image
     scan.string_format('format {name:fmt}')  # returns string formated from namespace
     scan.get_plot_data(xname, yname)  # return data for plotting with errors and labels
+    scan.plot(xname, yname)  # create plot**
+    scan.fit(xname, yname)  # fit data to peak***
 
 MultiScan class
   MultiScan class is a holder for multiple scans, allowing operations to be performed on all scans in the class.
     scans = MultiScan([scan1, scan2], **options)
     scans = scan1 + scan2
-    scans = omniscan.load_files(['file1', 'file2'], **options)
+    scans = babelscan.load_files(['file1', 'file2'], **options)
   Works in the same way as underlying scan class - calling the class will return a list of datasets from the scans.
     [output1, output2] = scans('name')
 
@@ -62,6 +67,8 @@ FolderMonitor class
     fm.updating_scan(12345)  # the resulting Scan class will reload on each operation
 
 *functions using eval only available when the "EVAL_MODE" setting is active.
+**functions using plot only available if "MATPLOTLIB_PLOTTING" setting is active and matplotlib installed
+***functions using fitting only available if lmfit installed
 
 By Dan Porter, PhD
 Diamond
@@ -74,14 +81,13 @@ Version History:
 13/04/21 0.1.0  Version History started.
 """
 
-from .__settings__ import EVAL_MODE
-from .omniscan import Scan, MultiScan
+from .__settings__ import EVAL_MODE, MATPLOTLIB_PLOTTING
+from .babelscan import Scan, MultiScan
 from .hdf import HdfScan
 from .dat import DatScan
 from .csv import CsvScan
 from .container import create_scan, file_loader, load_files, FolderMonitor
 
-print(EVAL_MODE)
 
 __version__ = "0.1.0"
 __date__ = "13/04/2021"

@@ -7,7 +7,7 @@ from imageio import imread  # read Tiff images
 from collections import OrderedDict
 
 from . import functions as fn
-from .omniscan import Scan
+from .babelscan import Scan
 
 
 "----------------------------LOAD FUNCTIONS---------------------------------"
@@ -94,7 +94,7 @@ def read_dat_file(filename):
 class DatScan(Scan):
     """
     Scan for .dat files
-    Reads data into omniscan class, storing data in the internal namespace
+    Reads data into babelscan class, storing data in the internal namespace
     Scan data and metadata can be requested using the the name of the dataset (e.g. 'eta')
     Usage:
         d = DatScan('file.dat')

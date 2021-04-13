@@ -6,6 +6,7 @@ import os
 import re
 import numpy as np
 
+from i16_nexus_viewer.babelscan import MATPLOTLIB_PLOTTING
 
 BYTES_DECODER = 'utf-8'
 VALUE_FUNCTION = np.mean  # lambda a: np.asarray(a).reshape(-1)[0]
@@ -191,3 +192,12 @@ def square_array(xaxis, yaxis, zaxis=None, repeat_length=None):
         zaxis = zaxis[:repeat_length * (len(zaxis) // repeat_length)].reshape(-1, repeat_length)
         return xaxis, yaxis, zaxis
     return xaxis, yaxis
+
+
+def init_plot():
+    """Initialise plotting"""
+    if MATPLOTLIB_PLOTTING:
+        from . import plotting_matplotlib as pm
+        return pm
+    else:
+        raise ImportError('Matplotlib not in use')

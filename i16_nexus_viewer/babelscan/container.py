@@ -7,7 +7,7 @@ import glob
 import numpy as np
 
 from . import functions as fn
-from .omniscan import Scan, MultiScan
+from .babelscan import Scan, MultiScan
 from .hdf import HdfScan
 from .dat import DatScan
 from .csv import CsvScan

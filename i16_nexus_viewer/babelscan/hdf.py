@@ -10,7 +10,7 @@ import h5py
 from imageio import imread  # read Tiff images
 
 from . import functions as fn
-from .omniscan import Scan
+from .babelscan import Scan
 
 
 "----------------------------LOAD FUNCTIONS---------------------------------"
