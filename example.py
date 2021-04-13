@@ -25,25 +25,28 @@ example_range = [r"C:\Users\dgpor\OneDrive - Diamond Light Source Ltd\I16\Nexus_
 # Create object
 #nl = nv.NexusLoader(file)
 #rm = nv.NexusLoader(rsmap)
-d = nv.Scan(file)
+#d = nv.Scan(file)
 
 # Create experiment
-exp = nv.i16.experiment(datadir)
+#exp = nv.i16.experiment(datadir)
 #exp.update_mode()
 #exp.get_addresses(0)
-print(exp)
+#print(exp)
 
-scan = exp.scan(0)
+#scan = exp.scan(0)
+
+from i16_nexus_viewer.scan_loader import Scan
+scan = Scan(file)
 print(scan)
 
-print(d('eta'))
-d.plot('axes', 'nroi[31,31]')
+print(scan('eta'))
+scan.plot('axes', 'nroi[31,31]')
 
 
 #print(output)
 
-allscan = exp.scans(exp.allscannumbers(), variables=['Ta', 'chi'])
-print(allscan)
+#allscan = exp.scans(exp.allscannumbers(), variables=['Ta', 'chi'])
+#print(allscan)
 
 #d = pm.ScanPlotsMatplotlib(file)
 
