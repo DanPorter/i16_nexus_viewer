@@ -74,21 +74,40 @@ By Dan Porter, PhD
 Diamond
 2021
 
-Version 0.1.0
-Last updated: 13/04/21
+Version 0.2.0
+Last updated: 16/04/21
 
 Version History:
 13/04/21 0.1.0  Version History started.
+16/04/21 0.2.0  Added instrument and other additions to Scan, changed container.py to folder_monitor.py
 """
 
-from .__settings__ import EVAL_MODE, MATPLOTLIB_PLOTTING
+
+__version__ = "0.2.0"
+__date__ = "16/04/2021"
+
+
+from .__settings__ import EVAL_MODE, PLOTTING_MODE
+
+
+def init_plot():
+    """Initialise plotting"""
+    if PLOTTING_MODE.lower() in ['matplotlib', 'pyplot']:
+        from . import plotting_matplotlib as pm
+        return pm
+    else:
+        raise ImportError('Matplotlib not in use')
+
+
+def init_peakfit():
+    """Initialise fitting"""
+    from .fitting import peakfit
+    return peakfit
+
+
 from .babelscan import Scan, MultiScan
 from .hdf import HdfScan
 from .dat import DatScan
 from .csv import CsvScan
-from .container import create_scan, file_loader, load_files, FolderMonitor
-
-
-__version__ = "0.1.0"
-__date__ = "13/04/2021"
-
+from .folder_monitor import create_scan, file_loader, load_files, FolderMonitor
+from .instrument import Instrument

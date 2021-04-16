@@ -10,6 +10,7 @@ import i16_nexus_viewer as nv
 file = r"C:\Users\dgpor\Dropbox\Python\ExamplePeaks\810002.nxs"  # eta scan with pilatus
 cv_file = r"C:\Users\dgpor\Dropbox\Python\ExamplePeaks\857991.nxs"  # trajectory scan/ cvscan/ kthZebra
 files = r"C:\Users\dgpor\Dropbox\Python\ExamplePeaks\%d.nxs"  # eta scan with pilatus
+datadir0 = r"C:\Users\dgpor\Dropbox\Python\ExamplePeaks"
 datadir = r"C:\Users\dgpor\OneDrive - Diamond Light Source Ltd\I16\Nexus_Format\example_nexus"  # eta scan with pilatus
 livedata = r"\\data.diamond.ac.uk\i16\data\2021\cm28156-1\%d.nxs"  # 879419
 liveexp = r"\\data.diamond.ac.uk\i16\data\2021\cm28156-1"
@@ -21,41 +22,12 @@ example_files1 = [f for f in os.listdir(r"C:\Users\dgpor\Dropbox\Python\ExampleP
 example_files2 = [f for f in os.listdir(r"C:\Users\dgpor\OneDrive - Diamond Light Source Ltd\I16\Nexus_Format\example_nexus") if f.endswith('.nxs')]
 example_range = [r"C:\Users\dgpor\OneDrive - Diamond Light Source Ltd\I16\Nexus_Format\example_nexus\%d.nxs" % fn for fn in range(794932, 794947, 1)]
 
-# Create object
-#nl = nv.NexusLoader(file)
-#rm = nv.NexusLoader(rsmap)
-#d = nv.Scan(file)
 
-# Create experiment
-#exp = nv.i16.experiment(datadir)
-#exp.update_mode()
-#exp.get_addresses(0)
-#print(exp)
-
-#scan = exp.scan(0)
-
-from i16_nexus_viewer import file_loader
-scan = file_loader(file)
-print(scan)
+exp = nv.i16.experiment([datadir0, datadir])
+scan = exp(810002)
 
 print(scan('eta'))
 scan.plot('axes', 'nroi[31,31]')
 scan.fit('axes', 'nroi[31,31]', plot_result=True)
 
-
-#print(output)
-
-#allscan = exp.scans(exp.allscannumbers(), variables=['Ta', 'chi'])
-#print(allscan)
-
-#d = pm.ScanPlotsMatplotlib(file)
-
-#nls = nv.nexus_loader.NexusMultiLoader([nv.NexusLoader(f) for f in example_range])
-
-
-#ds_str = nl.dataset('entry1/title')
-#ds_tim = nl.dataset('entry1/start_time')
-#ds_val = nl.dataset('/entry1/instrument/source/energy')
-#ds_arr = nl.dataset('entry1/measurement/eta')
-#ds_vol = rm.dataset('/processed/reciprocal_space/volume')
 

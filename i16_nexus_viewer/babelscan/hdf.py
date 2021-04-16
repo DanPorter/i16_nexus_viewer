@@ -241,7 +241,7 @@ def tree(hdf_group, detail=False, recursion_limit=100):
 "----------------------ADDRESS DATASET FUNCTIONS------------------------------"
 
 
-def get_address(hdf_group, name, address_list=None, return_group=False, ):
+def get_address(hdf_group, name, address_list=None, return_group=False):
     """
     Return address of dataset that most closely matches str name
      if multiple addresses match, take the longest array
@@ -522,6 +522,8 @@ class HdfScan(Scan):
         d('eta') >> finds dataset called 'eta' in hdf file, returns the array
         d.tree() >> returns str of hdf structure
         d.address('name') >> returns hdf address of 'name'
+        d.find_name('name') >> returns list of hdf addresses matching 'name'
+        d.find_image() >> returns location of image data, either tiff link or 3d volume
         d.axes() >> automatically finds the default xaxis, returns the array
         d.signal() >> automatically finds the default yaxis, returns the array
         d.image(idx) >> finds the image location if available and returns a detector image
@@ -533,16 +535,17 @@ class HdfScan(Scan):
         namespace = {
             'filename': filename,
             'filetitle': self.file,
-            'scanno': self.scan_number
+            'scan_number': self.scan_number
         }
         alt_names = {
-            # shortcut: name in file
+            # shortcut: name in namespace
+            'scanno': 'scan_number',
             'cmd': 'scan_command',
             'energy': 'en',
         }
         super().__init__(namespace, alt_names, **kwargs)
 
-        self._label_str.extend(['scanno', 'filetitle'])
+        self._label_str.extend(['scan_number', 'filetitle'])
         self._hdf_address_list = []
         self._hdf_name2address = {}
 
@@ -567,15 +570,16 @@ class HdfScan(Scan):
         hdf = load(self.filename)
         return hdf.get(address)
 
-    def tree(self, detail=False, recursion_limit=100):
+    def tree(self, group_address='/', detail=False, recursion_limit=100):
         """
         Return str of the full tree of data in a hdf object
+        :param group_address: str address of hdf group to start in
         :param detail: False/ True - provide further information about each group and dataset, including attributes
         :param recursion_limit: int max number of levels
         :return: str
         """
         with load(self.filename) as hdf:
-            out = tree(hdf, detail, recursion_limit)
+            out = tree(hdf[group_address], detail, recursion_limit)
         return out
 
     def add2namespace(self, name, data=None, other_names=None, hdf_address=None):
@@ -672,6 +676,17 @@ class HdfScan(Scan):
             return self._hdf_name2address[self._other2name[name]]
         self._load_data(name)
         return self._hdf_name2address[name]
+
+    def find_address(self, name, match_case=False, whole_word=False):
+        """
+        Find datasets using field name
+        :param name: str : name to match in dataset field name
+        :param match_case: if True, match case of name
+        :param whole_word: if True, only return whole word matches
+        :return: list of str matching dataset addresses
+        """
+        address_list = self._dataset_addresses()
+        return find_name(name, address_list, match_case, whole_word)
 
     def find_image(self, multiple=False):
         """

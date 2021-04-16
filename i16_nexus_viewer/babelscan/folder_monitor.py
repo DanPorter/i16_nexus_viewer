@@ -58,10 +58,14 @@ class FolderMonitor:
     """
     Monitors a folder or several folders for files following a particular format
     """
-    def __init__(self, data_directory, working_directory='.', **kwargs):
+    def __init__(self, data_directory, working_directory='.', scan_loader=None, **kwargs):
         data_directory = np.asarray(data_directory).reshape(-1)
         self._data_directories = data_directory
         self._working_directory = working_directory
+        if scan_loader is None:
+            self._scan_loader = file_loader
+        else:
+            self._scan_loader = scan_loader
 
         self._options = kwargs
         if 'title' in kwargs:
@@ -92,6 +96,22 @@ class FolderMonitor:
                (len(scanfiles), scanfiles[0], scanfiles[-1])
         return out
 
+    def __call__(self, *args, **kwargs):
+        try:
+            filename = self.getfile(args[0])
+            scans = self.scan(filename, **kwargs)
+        except TypeError:
+            scans = self.scans(args, **kwargs)
+        for arg in args[1:]:
+            try:
+                filename = self.getfile(arg)
+                scans += self.scan(filename, **kwargs)
+            except TypeError:
+                scans += self.scans(arg, **kwargs)
+        if len(scans) == 1:
+            return scans[0]
+        return scans
+
     def set_title(self, name):
         """Set experiment title"""
         self.title = name
@@ -108,7 +128,7 @@ class FolderMonitor:
         self._options.update(kwargs)
 
     def set_format(self, filename_format='%06d.nxs'):
-        """Set the file format to monitor"""
+        """Set the file format to monitor, uses printf-style string format, e.g. '%5d.nxs'"""
         self._filename_format = filename_format
 
     def add_data_directory(self, data_directory):
@@ -196,25 +216,19 @@ class FolderMonitor:
         options.update(kwargs)
 
         if os.path.isfile(filename):
-            return file_loader(filename, **options)
+            return self._scan_loader(filename, **options)
         raise Exception('Scan doesn\'t exist: %s' % filename)
     loadscan = readscan = scan
 
-    def updating_scan(self, scan_number_or_filename=0):
+    def updating_scan(self, scan_number_or_filename=0, **kwargs):
         """
         Generate Scan object for given scan using either scan number or filename.
         Data in the scan object will update each time it is called. Useful for live scan data.
         :param scan_number_or_filename: int or str file identifier
+        :param kwargs: options to send to file loader
         :return: Scan object
         """
-        try:
-            filename = self.getfile(scan_number_or_filename)
-        except TypeError:
-            raise Exception('Scan(\'%s\') filename must be number or string' % scan_number_or_filename)
-
-        if os.path.isfile(filename):
-            return file_loader(filename, reload=True, **self._options)
-        raise Exception('Scan doesn\'t exist: %s' % filename)
+        return self.scan(scan_number_or_filename, reload=True, **kwargs)
 
     def scans(self, scan_numbers_or_filenames, variables=None, **kwargs):
         """

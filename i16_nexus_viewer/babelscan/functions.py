@@ -4,9 +4,9 @@ Module of General functions
 
 import os
 import re
+import datetime
 import numpy as np
 
-from i16_nexus_viewer.babelscan import MATPLOTLIB_PLOTTING
 
 BYTES_DECODER = 'utf-8'
 VALUE_FUNCTION = np.mean  # lambda a: np.asarray(a).reshape(-1)[0]
@@ -62,6 +62,15 @@ def shortstr(string):
     return re.sub(r'\d+\.\d{5,}', subfun, string)
 
 
+def liststr(string):
+    """
+    Convert str or list of str to list of str
+    :param string: str, byteString, list, array
+    :return: list of str
+    """
+    return list(np.asarray(string, dtype=str).reshape(-1))
+
+
 def data_string(data):
     """
     Return string depiction of data
@@ -87,6 +96,29 @@ def data_string(data):
         array_end = array[-1]
         out_str = "%s [%s, ..., %s]"
         return out_str % (shape, array_start, array_end)
+
+
+def data_datetime(data, date_format=None):
+    """
+    Convert date string to datetime object
+      datetime_array = date_datetime('2020-10-22T09:33:11.894+01:00', "%Y-%m-%dT%H:%M:%S.%f%z")
+     datetime_array[0] will give first time
+     datetime_array[-1] will give last time
+    :param data: str or list of str
+    :param date_format: str format used in datetime.strptime (see https://strftime.org/)
+    :return: list of datetime
+    """
+    if date_format is None:
+        date_format = DATE_FORMAT
+
+    data = liststr(data)
+    try:
+        # str date passed, e.g. start_time: '2020-10-22T09:33:11.894+01:00'
+        dates = np.array([datetime.datetime.strptime(date, date_format) for date in data])
+    except ValueError:
+        # float timestamp passed, e.g. TimeFromEpoch: 1603355594.96
+        dates = np.array([datetime.datetime.fromtimestamp(float(time)) for time in data])
+    return dates
 
 
 def axes_from_cmd(cmd):
@@ -194,10 +226,18 @@ def square_array(xaxis, yaxis, zaxis=None, repeat_length=None):
     return xaxis, yaxis
 
 
-def init_plot():
-    """Initialise plotting"""
-    if MATPLOTLIB_PLOTTING:
-        from . import plotting_matplotlib as pm
-        return pm
+def time_difference(start_time, end_time=None):
+    """
+    Return time difference between first and last time
+    :param start_time: str or list
+    :param end_time: None or str
+    :return: datetime.timedelta
+    """
+    start_time = data_datetime(start_time)[0]
+    if end_time is None:
+        end_time = data_datetime(start_time)[-1]
     else:
-        raise ImportError('Matplotlib not in use')
+        end_time = data_datetime(end_time)[0]
+    time_delta = end_time - start_time
+    return time_delta
+

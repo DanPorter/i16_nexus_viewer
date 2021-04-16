@@ -5,6 +5,7 @@ babelscan object for holding many types of scan data
 import numpy as np
 from . import functions as fn
 from . import EVAL_MODE
+from . import init_plot, init_peakfit
 
 
 "----------------------------------------------------------------------------------------------------------------------"
@@ -39,6 +40,8 @@ class Scan:
       title_name - str, add a name to use to automatically find the title
       title_command - str, format specifier for title, e.g. '#{scan_number} Energy={en:5.2f} keV'
       scan_command_name - str, add a name to use to automatically find the scan command
+      start_time_name - str, add a name to use to automatically find the start_time
+      end_time_name - str, add a name to use to automatically find the end_time
       axes_name - str, add a name to use to automatically find the axes (xaxis)
       signal_name - str, add a name to use to automatically find the signal (yaxis)
       image_name - str, add a name to use to automatically find the detector image
@@ -117,6 +120,9 @@ class Scan:
         self._label_str = ['label']
         self._title_str = ['title', 'filename']
         self._scan_command_str = ['scan_command', 'cmd']
+        self._start_time_str = ['start_time']
+        self._end_time_str = ['end_time']
+        self._exposure_time_str = ['count_time', 'counttime', 't']
         self._axes_str = ['axes', 'xaxis']
         self._signal_str = ['signal', 'yaxis']
         self._image_name = None
@@ -196,7 +202,13 @@ class Scan:
         if 'title_name' in kwargs:
             self._title_str.insert(0, kwargs['title_name'])
         if 'scan_command_name' in kwargs:
-            self._scan_command_str.insert(0, kwargs['scan_command'])
+            self._scan_command_str.insert(0, kwargs['scan_command_name'])
+        if 'start_time_name' in kwargs:
+            self._start_time_str.insert(0, kwargs['start_time_name'])
+        if 'end_time_name' in kwargs:
+            self._end_time_str.insert(0, kwargs['end_time_name'])
+        if 'exposure_time_name' in kwargs:
+            self._exposure_time_str.insert(0, kwargs['exposure_time_name'])
         if 'axes_name' in kwargs:
             self._axes_str.insert(0, kwargs['axes_name'])
         if 'signal_name' in kwargs:
@@ -224,6 +236,9 @@ class Scan:
         if len(data) == 1:
             return data[0]
         return data
+
+    def __len__(self):
+        return self.scan_length()
 
     def __add__(self, addee):
         """
@@ -350,6 +365,16 @@ class Scan:
             return out[0]
         return out
 
+    def time(self, names, date_format=None):
+        """
+        Return datetime object from data name
+        :param names: str or list of str, key or associated key in namespace
+        :param date_format: str format used in datetime.strptime (see https://strftime.org/)
+        :return: list of datetime ojbjects
+        """
+        names, data = self._get_list_data(names)
+        return fn.data_datetime(data, date_format)
+
     "------------------------------- Operations -----------------------------------------"
 
     def _prep_operation(self, operation):
@@ -389,6 +414,8 @@ class Scan:
                 raise Exception('This operation is not allowed as it contains: "%s"' % bad)
         operation = self._prep_operation(operation)
         result = eval(operation, globals(), self._namespace)
+        if operation in self._namespace or operation in self._other2name:
+            return operation, result
         # add to namespace
         n = 1
         while 'operation%d' % n in self._namespace:
@@ -418,11 +445,17 @@ class Scan:
         """
         # get values inside brackets
         ops = fn.re_strop.findall(operation)
+        format_namespace = {}
         for op in ops:
             op = op.split(':')[0]  # remove format specifier
-            name, _ = self._get_name_data(op)
+            name, data = self._name_eval(op)
+            try:
+                value = fn.VALUE_FUNCTION(data)
+            except TypeError:
+                value = data
+            format_namespace[name] = value
             operation = operation.replace(op, name)
-        return operation.format(**self._namespace)
+        return operation.format(**format_namespace)
 
     def _get_error(self, name, operation=None):
         """
@@ -431,7 +464,7 @@ class Scan:
         :param operation: None* will default to zero, unless "error_function" in options
         :return: operation(array)
         """
-        data = self._get_data(name)
+        _, data = self._name_eval(name)
         if operation is None:
             if 'error_function' in self._options:
                 operation = self._options['error_function']
@@ -527,6 +560,74 @@ class Scan:
             except KeyError:
                 add2othernames += [s]
         raise Exception('No Scan Command in %r' % self)
+
+    def scan_time(self):
+        """
+        Return scan start time
+        :return: datetime
+        """
+        add2othernames = []
+        for s in self._start_time_str:
+            try:
+                data = self.time(s)[0]
+                self.add2namespace(s, other_names=add2othernames)
+                return data
+            except KeyError:
+                add2othernames += [s]
+        raise Exception('No start time in %r' % self)
+
+    def scan_finish(self):
+        """
+        Return scan end time
+        :return: datetime
+        """
+        add2othernames = []
+        for s in self._end_time_str:
+            try:
+                data = self.time(s)[0]
+                self.add2namespace(s, other_names=add2othernames)
+                return data
+            except KeyError:
+                add2othernames += [s]
+        for s in self._start_time_str[::-1]:
+            try:
+                data = self.time(s)[-1]
+                self.add2namespace(s, other_names=add2othernames)
+                return data
+            except KeyError:
+                add2othernames += [s]
+        raise Exception('No end time in %r' % self)
+
+    def duration(self, start_time=None, end_time=None):
+        """
+        Calculate time difference between two times
+        :param start_time: str name of date dataset or array of timestamps
+        :param end_time: None or str name of date dataset
+        :return: datetime.timedelta
+        """
+        if end_time is not None:
+            end_time = self.time(end_time)[-1]
+        if start_time is None:
+            start_time = self.scan_time()
+        else:
+            lst = self.time(start_time)
+            start_time = lst[0]
+            if len(lst) > 1 and end_time is None:
+                end_time = lst[-1]
+        if end_time is None:
+            end_time = self.scan_finish()
+        return end_time - start_time
+
+    def exposure_time(self):
+        """Return the exposure time"""
+        value = 1.0
+        for s in self._exposure_time_str:
+            try:
+                value = self.value(s)
+            except KeyError:
+                pass
+        self.add2namespace('exposure_time', value, other_names=self._exposure_time_str)
+        return value
 
     def _find_defaults(self):
         """
@@ -728,7 +829,7 @@ class Scan:
         Pass fit_type = LMFit model
         return LMFit output
         """
-        from .fitting import peakfit
+        peakfit = init_peakfit()
         xdata, ydata, yerror, xname, yname = self.get_plot_data(xaxis, yaxis, None, None)
 
         # lmfit
@@ -772,7 +873,7 @@ class Scan:
 
     "------------------------------- plotting -------------------------------------------"
 
-    def plotline(self, xaxis='axes', yaxis='signal', *args, axes=None, **kwargs):
+    def plotline(self, xaxis='axes', yaxis='signal', *args, **kwargs):
         """
         Plot scanned datasets on matplotlib axes subplot
         :param xaxis: str name or address of array to plot on x axis
@@ -782,15 +883,16 @@ class Scan:
         :param kwargs: given directly to plt.plot(..., *args, **kwars)
         :return: list lines object, output of plot
         """
-        pm = fn.init_plot()
+        pm = init_plot()
         xdata, ydata, yerror, xname, yname = self.get_plot_data(xaxis, yaxis, None, None)
 
         if 'label' not in kwargs:
             kwargs['label'] = self.label()
+        axes = kwargs['axes'] if 'axes' in kwargs else None
         lines = pm.plot_line(axes, xdata, ydata, None, *args, **kwargs)
         return lines
 
-    def plot(self, xaxis='axes', yaxis='signal', *args, axes=None, **kwargs):
+    def plot(self, xaxis='axes', yaxis='signal', *args, **kwargs):
         """
         Create matplotlib figure with plot of the scan
         :param axes: matplotlib.axes subplot
@@ -801,12 +903,14 @@ class Scan:
         :param kwargs: given directly to plt.plot(..., *args, **kwars)
         :return: axes object
         """
-        pm = fn.init_plot()
+        pm = init_plot()
         # Check for multiple inputs on yaxis
         ylist = np.asarray(yaxis, dtype=str).reshape(-1)
 
         # Create figure
-        if axes is None:
+        if 'axes' in kwargs:
+            axes = kwargs['axes']
+        else:
             axes = pm.create_axes(subplot=111)
 
         # x axis data
@@ -837,7 +941,7 @@ class Scan:
         :param kwargs: additinoal arguments for plot_detector_image
         :return: axes object
         """
-        pm = fn.init_plot()
+        pm = init_plot()
         # x axis data
         xname, xdata = self._get_name_data(xaxis)
 
@@ -898,6 +1002,9 @@ class MultiScan:
 
     def __getitem__(self, item):
         return self._scan_list[item]
+
+    def __len__(self):
+        return len(self._scan_list)
 
     def add_variable(self, name):
         """

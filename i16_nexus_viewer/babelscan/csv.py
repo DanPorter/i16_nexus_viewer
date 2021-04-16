@@ -72,10 +72,11 @@ class CsvScan(Scan):
         namespace = {
             'filename': filename,
             'filetitle': self.file,
-            'scanno': self.scan_number
+            'scan_number': self.scan_number
         }
         alt_names = {
             # shortcut: name in file
+            'scanno': 'scan_number',
             'cmd': 'scan_command',
         }
         super().__init__(namespace, alt_names, **kwargs)

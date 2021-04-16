@@ -22,8 +22,8 @@ By Dan Porter, PhD
 Diamond
 2019
 
-Version 0.5.0
-Last updated: 13/04/21
+Version 0.6.0
+Last updated: 16/04/21
 
 Version History:
 22/09/20 0.1.0  Version History started.
@@ -31,30 +31,27 @@ Version History:
 30/11/20 0.3.0  reformat functions_nexus and nexus_loader, add nroi
 29/03/21 0.4.0  currently working using nexus ReLoader
 13/04/21 0.5.0  Created babelscan scan wrapper, but nothing else works
+16/04/21 0.6.0  Basic i16 specific file loading now works
 """
 
-import os
-import numpy as np
-"""
-from lmfit.models import GaussianModel, VoigtModel, LinearModel
-
-from .__settings__ import MATPLOTLIB_PLOTTING
-from .functions_nexus import load, reload, Hdf5Nexus
-from .nexus_loader import NexusLoader
-from .nexus_scan import Scan, MultiScan
-from .nexus_experiment import Beamline, Experiment
-from .fitting import peakfit
-"""
-from .babelscan import file_loader, FolderMonitor
-
+from .babelscan import file_loader, FolderMonitor, Instrument
+from .babelscan import init_plot
+from .beamlines import beamlines
 from . import functions_general as fg
 
-__version__ = "0.5.0"
-__date__ = "13/04/2021"
+__version__ = "0.6.0"
+__date__ = "16/04/2021"
 
 
-# Set up Beamline i16
-#i16 = Beamline('i16')
+def experiment(data_folder, working_dir='.', **kwargs):
+    return FolderMonitor(data_folder, working_dir, **kwargs)
+
+
+# Plotting functions
+pm = init_plot()
+
+# I16 Instrument
+i16 = beamlines['i16']
 
 
 def start_gui(experiment=None, config_filename=None):
