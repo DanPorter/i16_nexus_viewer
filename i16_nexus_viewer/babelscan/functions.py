@@ -17,8 +17,8 @@ OUTPUT_FORMAT = '%20s = %s'
 # Compile useful pattern strings
 re_integer = re.compile(r'\d+')
 re_address = re.compile(r'\w*?/[\w/]*')
-re_nroi = re.compile(r'nroi\[\d+,\d+,\d+,\d+\]|nroi\[\d+,\d+\]')
-re_varname = re.compile(r'[a-zA-Z]\w*')
+re_nroi = re.compile(r'nroi.*\[[\d\s,]+\]')  # catch nroi[31, 31], nroi_bkg[243,97,31,41]
+re_varname = re.compile(r'[a-zA-Z]\w*\[.+\]|[a-zA-Z]\w*')  # catch ab5, ab[31, 31]
 re_strop = re.compile(r'\{(.+?)\}')
 
 
@@ -60,6 +60,15 @@ def shortstr(string):
     def subfun(m):
         return str(round(float(m.group()), 3))
     return re.sub(r'\d+\.\d{5,}', subfun, string)
+
+
+def bytestr2str(string):
+    """
+    Convert bytestr or str to str
+    :param string: Bytes or str
+    :return: str
+    """
+    return np.asarray(string, dtype=str)[()]
 
 
 def liststr(string):

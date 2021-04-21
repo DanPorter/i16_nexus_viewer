@@ -90,7 +90,7 @@ DEFAULTS_HELP = {
     'filename_format': 'name of scan files using scan number',
     'scan_length': 'nexus address or name of entry giving scan length or number of points',
     'scan_number': 'nexus address or name of entry giving scan number',
-    'start_time': 'nexus address or name of entry giving start time',
+    'start_time': 'nexus address or name of entry giving time_start time',
     'end_time': 'nexus address or name of entry giving end time',
     'title': 'nexus address or name of entry giving scan title',
     'cmd': 'nexus address or name of entry giving scan command',
@@ -400,7 +400,7 @@ def dataset_addresses(hdf_group, addresses='/', recursion_limit=100, get_size=No
     """
     Return list of addresses of datasets, starting at each address
     :param hdf_group: hdf5 File or Group object
-    :param addresses: list of str or str : start in this / these addresses
+    :param addresses: list of str or str : time_start in this / these addresses
     :param recursion_limit: Limit on recursivley checking lower groups
     :param get_size: None or int, if int, return only datasets with matching size
     :param get_ndim: None or int, if int, return only datasets with matching ndim
@@ -894,7 +894,7 @@ def duration(hdf_group, start_address='start_time', end_address='end_time', addr
     """
     Determine the duration of a scan using the start_time and end_time datasets
     :param hdf_group: hdf5 File or Group object 
-    :param start_address: address or name of start time dataset
+    :param start_address: address or name of time_start time dataset
     :param end_address: address or name of end time dataset
     :param address_list: list of str of dataset addresses (None to generate from hdf_group)
     :return: datetime.timedelta

@@ -13,17 +13,18 @@ from .dat import DatScan
 from .csv import CsvScan
 
 
-def create_scan(data, headers, alternate_names=None, **kwargs):
+def create_scan(data, headers, alternate_names=None, default_values=None, **kwargs):
     """
     Create data holder instance
     :param data: list of data
     :param headers: list of headers for data
     :param alternate_names: dict of aternate names to headers (or None)
+    :param default_values: dict of default values (or None)
     :param kwargs: other options
     :return: Scan
     """
     name2data = {n: d for n,d in zip(headers, data)}
-    return Scan(name2data, alternate_names, **kwargs)
+    return Scan(name2data, alternate_names, default_values, **kwargs)
 
 
 def file_loader(filename, **kwargs):
@@ -100,6 +101,8 @@ class FolderMonitor:
         try:
             filename = self.getfile(args[0])
             scans = self.scan(filename, **kwargs)
+            if len(args) == 1:
+                return scans
         except TypeError:
             scans = self.scans(args, **kwargs)
         for arg in args[1:]:
@@ -108,8 +111,6 @@ class FolderMonitor:
                 scans += self.scan(filename, **kwargs)
             except TypeError:
                 scans += self.scans(arg, **kwargs)
-        if len(scans) == 1:
-            return scans[0]
         return scans
 
     def set_title(self, name):
@@ -229,6 +230,23 @@ class FolderMonitor:
         :return: Scan object
         """
         return self.scan(scan_number_or_filename, reload=True, **kwargs)
+
+    def _backup_loader(self, scan_number_or_filename=0, **kwargs):
+        """
+        Generate Scan object for given scan using either scan number or filename.
+        :param scan_number_or_filename: int or str file identifier
+        :param kwargs: options to send to file loader
+        :return: Scan object
+        """
+
+        try:
+            filename = self.getfile(scan_number_or_filename)
+        except TypeError:
+            raise Exception('Scan(\'%s\') filename must be number or string' % scan_number_or_filename)
+
+        if os.path.isfile(filename):
+            return file_loader(filename)
+        raise Exception('Scan doesn\'t exist: %s' % filename)
 
     def scans(self, scan_numbers_or_filenames, variables=None, **kwargs):
         """

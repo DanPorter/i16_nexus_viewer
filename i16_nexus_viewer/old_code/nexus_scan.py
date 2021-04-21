@@ -122,7 +122,7 @@ class Scan(NexusLoader):
     def duration(self, start_address=None, end_address=None):
         """
         Determine the duration of a scan using the start_time and end_time datasets
-        :param start_address: address or name of start time dataset
+        :param start_address: address or name of time_start time dataset
         :param end_address: address or name of end time dataset
         :return: datetime.timedelta
         """
@@ -240,7 +240,7 @@ class Scan(NexusLoader):
     def auto_xyaxis(self, address='/', cmd_string=None):
         """
         Find default axes, signal hdf addresses using 'axes', 'signal' attributes, or from scan command
-        :param address: str addtress to start in
+        :param address: str addtress to time_start in
         :param cmd_string: str of command to take x,y axis from as backup
         :return: xaxis_address, yaxis_address
         """

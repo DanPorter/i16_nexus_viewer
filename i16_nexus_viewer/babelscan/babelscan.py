@@ -50,6 +50,7 @@ class Scan:
       error_function - func., operation to perform on signal to generate errors. e.g. np.sqrt
       debug - str or list of str, options for debugging, options:
         'namespace' - displays when items are added to the namespace
+        'eval' - displays when eval operations are used
 
     Functions
     add2namespace(name, data=None, other_names=None, hdf_address=None)
@@ -109,12 +110,15 @@ class Scan:
     value(names, array_function=None)
         Return single value of data
     """
-    def __init__(self, namespace, alt_names=None, **kwargs):
+    def __init__(self, namespace, alt_names=None, default_values=None, **kwargs):
         self._namespace = kwargs.copy()
-        self._other2name = {}
+        self._alt_names = {}
         self._namespace.update(namespace)
         if alt_names is not None:
-            self._other2name.update(alt_names)
+            self._alt_names.update(alt_names)
+        self._default_values = {}
+        if default_values is not None:
+            self._default_values.update(default_values)
 
         self._options = {}
         self._label_str = ['label']
@@ -130,6 +134,8 @@ class Scan:
         self._print_list = ['scan_command', 'axes', 'signal']
         self._reload_mode = False
         self._set_options(**kwargs)
+
+        self._debug('init', '%r' % self)
 
     "------------------------------- Basic Operations -------------------------------------------"
 
@@ -149,38 +155,45 @@ class Scan:
             return "Reload mode is OFF"
         self._reload_mode = mode
 
-    def add2namespace(self, name, data=None, other_names=None):
+    def add2namespace(self, name, data=None, other_names=None, default_value=None):
         """
         set data in namespace
-        :param name: str name
+        :param name: str name or list of names (each name will store the same data)
         :param data: any or None, data to store in namespace (nothing stored if None)
         :param other_names: str, list of str or None - strings to associate with name, giving the same result
+        :param default_value: any or None, data to store in default_value namespace (nothing stored if None)
         :return: None
         """
+        names = fn.liststr(name)
         if data is not None:
-            self._namespace[name] = data
-            if 'debug' in self._options and 'namespace' in self._options['debug']:
-                print('Add to namespace: %s: %s' % (name, fn.data_string(data)))
+            for name in names:
+                self._namespace[name] = data
+                self._debug('namespace', 'Add to namespace: %s: %s' % (name, fn.data_string(data)))
         if other_names is not None:
-            other_names = np.asarray(other_names, dtype=str).reshape(-1)
+            other_names = fn.liststr(other_names)
             for other_name in other_names:
-                self._other2name[other_name] = name
-                if 'debug' in self._options and 'namespace' in self._options['debug']:
-                    print('Add association: %s: %s' % (other_name, name))
+                if other_name in self._alt_names:
+                    self._alt_names[other_name] += names
+                else:
+                    self._alt_names[other_name] = names
+                self._debug('namespace', 'Add alt. name: %s: %s' % (other_name, names))
+        if default_value is not None:
+            for name in names:
+                self._default_values[name] = default_value
+                self._debug('namespace', 'Add to namespace: %s: %s' % (name, fn.data_string(data)))
 
     def show_namespace(self):
         """return str of namespace"""
         out = 'Namespace %r:\n' % self
         out += '%-20s %-60s | %s\n' % ('Name', 'Alternate Names', 'Data')
         for key, item in self._namespace.items():
-            other_names = ', '.join(okey for okey, oitem in self._other2name.items() if oitem == key)
+            other_names = ', '.join(okey for okey, oitem in self._alt_names.items() if key in oitem)
             out += '%-20s %-60s | %s\n' % (key, other_names, fn.data_string(item))
         return out
 
     def add2strlist(self, names):
         """Add to list of names in str output"""
-        names = list(np.asarray(names, dtype=str).reshape(-1))
-        self._print_list += names
+        self._print_list += fn.liststr(names)
 
     def options(self, **kwargs):
         """Set or display options"""
@@ -198,30 +211,44 @@ class Scan:
         if 'reload' in kwargs:
             self._reload_mode = kwargs['reload']
         if 'label_name' in kwargs:
-            self._label_str.insert(0, kwargs['label_name'])
+            self._label_str = fn.liststr(kwargs['label_name'])
         if 'title_name' in kwargs:
-            self._title_str.insert(0, kwargs['title_name'])
+            self._title_str = fn.liststr(kwargs['title_name'])
         if 'scan_command_name' in kwargs:
-            self._scan_command_str.insert(0, kwargs['scan_command_name'])
+            self._scan_command_str = fn.liststr(kwargs['scan_command_name'])
         if 'start_time_name' in kwargs:
-            self._start_time_str.insert(0, kwargs['start_time_name'])
+            self._start_time_str = fn.liststr(kwargs['start_time_name'])
         if 'end_time_name' in kwargs:
-            self._end_time_str.insert(0, kwargs['end_time_name'])
+            self._end_time_str = fn.liststr(kwargs['end_time_name'])
         if 'exposure_time_name' in kwargs:
-            self._exposure_time_str.insert(0, kwargs['exposure_time_name'])
+            self._exposure_time_str = fn.liststr(kwargs['exposure_time_name'])
         if 'axes_name' in kwargs:
-            self._axes_str.insert(0, kwargs['axes_name'])
+            self._axes_str = fn.liststr(kwargs['axes_name'])
         if 'signal_name' in kwargs:
-            self._signal_str.insert(0, kwargs['signal_name'])
+            self._signal_str = fn.liststr(kwargs['signal_name'])
         if 'image_name' in kwargs:
-            self._image_name.insert(0, kwargs['image_name'])
+            self._image_name = fn.liststr(kwargs['image_name'])
         if 'str_list' in kwargs:
-            self.add2strlist(kwargs['str_list'])
+            self._print_list = fn.liststr(kwargs['str_list'])
+
+    def _debug(self, debug_name, message):
+        """
+        Returns message if debug option active
+        :param debug_name: str name to match in self._options['debug']
+        :param message: str message to print if true
+        :return: None
+        """
+        if 'debug' in self._options and debug_name in self._options['debug']:
+            m = 'db:%s: %s' % (debug_name, message)
+            print(m)
+        elif 'debug' in self._options and 'all' in self._options['debug']:
+            m = 'db:%s: %s' % (debug_name, message)
+            print(m)
 
     "------------------------------- class operations -------------------------------------------"
 
     def __repr__(self):
-        return 'Scan(namespace: %d, alt_names: %d)' % (len(self._namespace), len(self._other2name))
+        return 'Scan(namespace: %d, alt_names: %d)' % (len(self._namespace), len(self._alt_names))
 
     def __str__(self):
         out = self.__repr__()
@@ -248,45 +275,79 @@ class Scan:
 
     "------------------------------- data -------------------------------------------"
 
-    def _get_data(self, name):
+    def _load_data(self, name):
         """
-        Get data from stored dicts
-          This function may be overloaded in subclasses
+        Check name in external dictionary, add to internal namespace
+          This function will be overloaded in subclasses
+        If 'name' not available, raise KeyError
+        :param name: str
+        """
+        self._debug('load', 'Searching external databases for close match to: %s' % name)
+        # Search for close match
+        keys = [k.lower() for k in self._namespace.keys()]
+        if name.lower() in keys:
+            data = self._namespace[keys[keys.index(name.lower())]]
+            self.add2namespace(name, data)
+            return
+        for key in keys:
+            if name.lower() in key:
+                data = self._namespace[key]
+                self.add2namespace(name, data)
+                return
+        raise KeyError('\'%s\' not available in %r' % (name, self))
+
+    def _get_name_data(self, name):
+        """
+        Get name and data from stored dicts
+        Search hierachy:
+          1. Check namespace for name, return namespace[name]
+          2. Check alt_names for name, return namespace[alt_names[name][i]]
+          3. Check name against special names in axes_str, signal_str
+          4. Check name against 'nroi'
+          5. Check name in external source e.g. hdf file
+          6. Check name, alt_names in defaults_namespace
+          7. If not available, raise KeyError
         :param name: str, key or associated key in namespace
-        :return: data from namespace dict
+        :return name, data: from namespace dict
         """
+        if self._reload_mode:
+            self._load_data(name)
+        self._debug('load', 'Looking for %s in namespace, alt_names, specials' % name)
         if name in self._namespace:
-            return self._namespace[name]
-        if name in self._other2name and self._other2name[name] in self._namespace:
-            return self._namespace[self._other2name[name]]
-        elif name in self._other2name:
-            return self._get_data(self._other2name[name])
+            return name, self._namespace[name]
+        if name in self._alt_names:
+            for alt_name in self._alt_names[name]:
+                if alt_name in self._namespace:
+                    return alt_name, self._namespace[alt_name]
         # Check defaults
-        if name in self._axes_str:
-            return self.axes()
+        if name in self._axes_str:  # e.g. 'axes'
+            return self.axes()  # return _get_name_data('eta')
         if name in self._signal_str:
             return self.signal()
         # Check new region of interest
         if 'nroi' in name:
             roi_sum, roi_max = self.image_roi_op(name)
-            return roi_sum
-        # Start searching for alternate names
-        if name.lower() in [key.lower() for key in self._namespace]:
-            return self._namespace[name]
-        if name.lower() in [key.lower() for key in self._other2name]:
-            return self._namespace[self._other2name[name]]
-        raise KeyError('\'%s\' not available' % name)
+            return name, roi_sum
+        # Load data from external dictionary (e.g. hdf file)
+        # 'name' will be added to namespace, or KeyError will be raised
+        # _load_data can be overloaded in subclasses
+        try:
+            self._load_data(name)
+            return self._get_name_data(name)
+        except KeyError as ke:
+            # Finally, check the defaults namespace
+            if name in self._default_values:
+                self.add2namespace(name, self._default_values[name])
+                return name, self._default_values[name]
+            if name in self._alt_names:
+                for alt_name in self._alt_names[name]:
+                    if alt_name in self._default_values:
+                        self.add2namespace(alt_name, self._default_values[name], name)
+                        return alt_name, self._default_values[alt_name]
+            raise ke
 
-    def _get_name_data(self, name):
-        """
-        Get name and data from stored dicts
-        :param name: str, key or associated key in namespace
-        :return name, data: from namespace dict
-        """
-        data = self._get_data(name)
-        if name in self._other2name:
-            name = self._other2name[name]
-        return name, data
+    def _get_data(self, name):
+        return self._get_name_data(name)[1]
 
     def _get_list_data(self, names):
         """
@@ -294,7 +355,7 @@ class Scan:
         :param names: str or list of str, key or associated key in namespace
         :return: list of data from namespace dict
         """
-        names = np.asarray(names, dtype=str).reshape(-1)
+        names = fn.liststr(names)
         data = []
         new_name = []
         for name in names:
@@ -386,6 +447,8 @@ class Scan:
         # First look for addresses in operation to seperate addresses from divide operations
         # addresses = fn.re_address.findall(operation)
 
+        old_op = operation
+
         # Determine custom regions of interest 'nroi'
         rois = fn.re_nroi.findall(operation)
         for name in rois:
@@ -398,6 +461,7 @@ class Scan:
             new_name, data = self._get_name_data(name)
             if new_name != name:
                 operation = operation.replace(name, new_name)
+        self._debug('eval', 'Prepare eval operation\n  initial: %s\n  final: %s' % (old_op, operation))
         return operation
 
     def _name_eval(self, operation):
@@ -414,7 +478,7 @@ class Scan:
                 raise Exception('This operation is not allowed as it contains: "%s"' % bad)
         operation = self._prep_operation(operation)
         result = eval(operation, globals(), self._namespace)
-        if operation in self._namespace or operation in self._other2name:
+        if operation in self._namespace or operation in self._alt_names:
             return operation, result
         # add to namespace
         n = 1
@@ -561,9 +625,9 @@ class Scan:
                 add2othernames += [s]
         raise Exception('No Scan Command in %r' % self)
 
-    def scan_time(self):
+    def time_start(self):
         """
-        Return scan start time
+        Return scan time_start time
         :return: datetime
         """
         add2othernames = []
@@ -574,9 +638,9 @@ class Scan:
                 return data
             except KeyError:
                 add2othernames += [s]
-        raise Exception('No start time in %r' % self)
+        raise Exception('No time_start time in %r' % self)
 
-    def scan_finish(self):
+    def time_end(self):
         """
         Return scan end time
         :return: datetime
@@ -584,7 +648,7 @@ class Scan:
         add2othernames = []
         for s in self._end_time_str:
             try:
-                data = self.time(s)[0]
+                data = self.time(s)[-1]
                 self.add2namespace(s, other_names=add2othernames)
                 return data
             except KeyError:
@@ -608,14 +672,14 @@ class Scan:
         if end_time is not None:
             end_time = self.time(end_time)[-1]
         if start_time is None:
-            start_time = self.scan_time()
+            start_time = self.time_start()
         else:
             lst = self.time(start_time)
             start_time = lst[0]
             if len(lst) > 1 and end_time is None:
                 end_time = lst[-1]
         if end_time is None:
-            end_time = self.scan_finish()
+            end_time = self.time_end()
         return end_time - start_time
 
     def exposure_time(self):
@@ -656,12 +720,15 @@ class Scan:
             if name in self._namespace:
                 self.add2namespace(name, other_names=add2othernames)
                 return self._namespace[name]
-            if name in self._other2name:
-                return self._namespace[self._other2name[name]]
+            if name in self._alt_names:
+                for alt_name in self._alt_names[name]:
+                    if alt_name in self._namespace:
+                        self.add2namespace(name, other_names=add2othernames)
+                        return self._namespace[alt_name]
             add2othernames += [name]
         # axes not in namespace, get from scan command
         axes_name, signal_name = self._find_defaults()
-        return self._get_data(axes_name)
+        return self._get_name_data(axes_name)
 
     def signal(self):
         """
@@ -673,12 +740,15 @@ class Scan:
             if name in self._namespace:
                 self.add2namespace(name, other_names=add2othernames)
                 return self._namespace[name]
-            if name in self._other2name:
-                return self._namespace[self._other2name[name]]
+            if name in self._alt_names:
+                for alt_name in self._alt_names[name]:
+                    if alt_name in self._namespace:
+                        self.add2namespace(name, other_names=add2othernames)
+                        return self._namespace[alt_name]
             add2othernames += [name]
         # signal not in namespace, get from scan command
         axes_name, signal_name = self._find_defaults()
-        return self._get_data(signal_name)
+        return self._get_name_data(signal_name)
 
     def scan_length(self):
         """
@@ -816,7 +886,9 @@ class Scan:
         while 'nroi%d_sum' % n in self._namespace:
             n += 1
         n -= 1
-        self.add2namespace('nroi%d_sum' % n, other_names=operation)
+        name = 'nroi%d_sum' % n
+        self._debug('nroi', 'New ROI created: %s, saved in namespace as %s' % (operation, name))
+        self.add2namespace(name, other_names=operation)
         return roi_sum, roi_max
 
     "------------------------------- fitting -------------------------------------------"
@@ -913,20 +985,12 @@ class Scan:
         else:
             axes = pm.create_axes(subplot=111)
 
-        # x axis data
-        xname, xdata = self._get_name_data(xaxis)
-
-        # Add plots
-        ynames = []
-        for yaxis in ylist:
-            yname, ydata = self._get_name_data(yaxis)
-            ynames += [yname]
-            pm.plot_line(axes, xdata, ydata, None, *args, label=yname, **kwargs)
+        xdata, ydata, yerror, xname, yname = self.get_plot_data(xaxis, yaxis, None, None)
+        pm.plot_line(axes, xdata, ydata, None, *args, label=yname, **kwargs)
 
         # Add labels
         ttl = self.title()
-        ylabel = ', '.join(set(ynames))
-        pm.labels(ttl, xname, ylabel, legend=True)
+        pm.labels(ttl, xname, yname, legend=True)
         return axes
 
     def plot_detector(self, index=None, xaxis='axes', axes=None, clim=None, cmap=None, colorbar=False, **kwargs):
@@ -963,7 +1027,7 @@ class Scan:
 
 
 "----------------------------------------------------------------------------------------------------------------------"
-"--------------------------------------------- MultiScan ------------------------------------------------------------"
+"----------------------------------------------- MultiScan ------------------------------------------------------------"
 "----------------------------------------------------------------------------------------------------------------------"
 
 
@@ -991,7 +1055,7 @@ class MultiScan:
         variables = self.string(self._variables)
         out = ''
         for n in range(len(self._scan_list)):
-            out += '%s: %s\n' % (self._scan_list[n].label(), variables[n])
+            out += '%3d %s: %s\n' % (n, self._scan_list[n].label(), variables[n])
         return out
 
     def __add__(self, other):

@@ -18,8 +18,25 @@ livedata = r"\\data.diamond.ac.uk\i16\data\2021\cm28156-1\%d.nxs"  # 879419
 rsmap = r"C:\Users\dgpor\OneDrive - Diamond Light Source Ltd\I16\Nexus_Format\example_nexus\rsmap_872996_201215_101906.nxs"
 rsmap = r"C:\Users\dgpor\OneDrive - Diamond Light Source Ltd\I16\Nexus_Format\example_nexus\872996-pilatus3_100k-files\rsmap_872996_201215_101906.nxs"
 
-scan = file_loader(file)
+scan = file_loader(file, debug='all')
+scan.add2namespace(['count_time', 'counttime', 'Time', 't'], None, 'count_time')
 print(scan)
+print('\n\n')
+print(scan('count_time'))
+print('\n\n')
+print(scan('nroi[31,31]'))
+
+
+print('\n\n New scan')
+scan = file_loader(r"C:\Users\dgpor\OneDrive - Diamond Light Source Ltd\I16\Nexus_Format\example_nexus\877619.nxs" , debug=['namespace', 'hdf']) # merlin
+scan.add2namespace(['count_time', 'counttime', 'Time', 't'], None, 'count_time')
+print(scan)
+print(scan('count_time'))
+
+
+exp = FolderMonitor(datadir)
+d = exp.scan(0)
+print(d)
 
 x, y, dy, xlab, ylab = scan.get_plot_data('axes', 'nroi[31,31]', '/Transmission', np.sqrt)
 
@@ -29,10 +46,6 @@ plt.xlabel(xlab)
 plt.ylabel(ylab)
 plt.title(scan.title())
 plt.show()
-
-exp = FolderMonitor(datadir)
-d = exp.scan(0)
-print(d)
 
 scan_range = range(794932, 794947, 1)  # datadir, sperp, spara, eta scans
 scans = exp.scans(scan_range, ['sperp', 'spara'])

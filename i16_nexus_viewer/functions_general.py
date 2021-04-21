@@ -352,8 +352,8 @@ def unique_vector(vecarray, tol=0.05):
 
 def distance2line(line_start, line_end, point):
     """
-    Calculate distance from a line between the start and end to an arbitary point in space
-    :param line_start: array, position of the start of the line
+    Calculate distance from a line between the time_start and end to an arbitary point in space
+    :param line_start: array, position of the time_start of the line
     :param line_end:  array, position of the end of the line
     :param point: array, arbitary position in space
     :return: float
@@ -1007,7 +1007,7 @@ def gauss(x, y=None, height=1, cen=0, fwhm=0.5, bkg=0):
 
 def frange(start, stop=None, step=1):
     """
-    Returns a list of floats from start to stop in step increments
+    Returns a list of floats from time_start to stop in step increments
     Like np.arange but ends at stop, rather than at stop-step
     E.G.
     A = frange(0,5,1) = [0.,1.,2.,3.,4.,5.]

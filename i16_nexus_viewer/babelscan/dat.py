@@ -8,6 +8,7 @@ from collections import OrderedDict
 
 from . import functions as fn
 from .babelscan import Scan
+from .lazyvolume import LazyVolume
 
 
 "----------------------------LOAD FUNCTIONS---------------------------------"
@@ -114,9 +115,9 @@ class DatScan(Scan):
         }
         alt_names = {
             # shortcut: name in file
-            'scanno': 'scan_number',
-            'scan_command': 'cmd',
-            'energy': 'en',
+            'scanno': ['scan_number'],
+            'scan_command': ['cmd'],
+            'energy': ['en'],
         }
         super().__init__(namespace, alt_names, **kwargs)
         self._label_str.extend(['scanno', 'filetitle'])
@@ -131,19 +132,26 @@ class DatScan(Scan):
 
     def __repr__(self):
         out = 'DatScan(filename: %s, namespace: %d, associations: %d)'
-        return out % (self.filename, len(self._namespace), len(self._other2name))
+        return out % (self.filename, len(self._namespace), len(self._alt_names))
 
-    def _load_data(self):
+    def _load_data(self, name):
+        """
+        Load data from hdf file
+          Overloads Scan._load_data to read hdf file
+          if 'name' not available, raises KeyError
+        :param name: str name or address of data
+        """
         dataobj = read_dat_file(self.filename)
         self._namespace.update(dataobj.metadata)
         self._namespace.update(dataobj)
-        return dataobj
-
-    def _get_data(self, name):
-        if self._reload_mode:
-            self.dat = self._load_data()
-        return super()._get_data(name)
-
+        if name in self._namespace:
+            return
+        if name in self._alt_names:
+            for alt_name in self._alt_names[name]:
+                if alt_name in self._namespace:
+                    return
+        super(DatScan, self)._load_data(name)
+        
     def image(self, idx=None):
         """
         Load image from dat file image path tempate
@@ -163,4 +171,22 @@ class DatScan(Scan):
             idx = len(pointers)
         image_pointer = self._namespace[image_name] % pointers[idx]
         return imread(image_pointer)
+
+    def volume(self):
+        """
+        Load image as LazyVolume
+        :return: LazyVolume
+        """
+        if self._image_name:
+            image_name = self._image_name
+        else:
+            try:
+                image_name = [s for s in self._namespace.keys() if "_path_template" in s][0]
+                self._image_name = image_name
+            except IndexError:
+                raise KeyError('image path template not found in %r' % self)
+        pointers = self._get_data('path')  # list of image numbers in dat files
+        path_spec = self._namespace[image_name]
+        filenames = [path_spec % pointer for pointer in pointers]
+        return LazyVolume(filenames)
 

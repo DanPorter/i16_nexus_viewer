@@ -20,7 +20,7 @@ def read_csv_file(filename):
     with open(filename) as f:
         lines = f.readlines()
 
-    # find start of data
+    # find time_start of data
     for n, ln in enumerate(lines):
         values = ln.split(',')
         if len(values) < 2: continue
@@ -92,19 +92,20 @@ class CsvScan(Scan):
 
     def __repr__(self):
         out = 'CsvScan(filename: %s, namespace: %d, associations: %d)'
-        return out % (self.filename, len(self._namespace), len(self._other2name))
+        return out % (self.filename, len(self._namespace), len(self._alt_names))
 
-    def _load_data(self):
+    def _load_data(self, name):
+        """
+        Load data from hdf file
+          Overloads Scan._load_data to read hdf file
+          if 'name' not available, raises KeyError
+        :param name: str name or address of data
+        """
         header, data = read_csv_file(self.filename)
         dataobj = {name: col for name, col in zip(header, data.T)}
         self._namespace.update(dataobj)
         # Set axes, signal defaults
         self.add2namespace(header[0], other_names=self._axes_str[0])
         self.add2namespace(header[1], other_names=self._signal_str[0])
-        return header, data
-
-    def _get_data(self, name):
-        if self._reload_mode:
-            self.header, self.data = self._load_data()
-        return super()._get_data(name)
+        super(CsvScan, self)._load_data(name)
 

@@ -11,6 +11,7 @@ from imageio import imread  # read Tiff images
 
 from . import functions as fn
 from .babelscan import Scan
+from .lazyvolume import LazyVolume
 
 
 "----------------------------LOAD FUNCTIONS---------------------------------"
@@ -160,7 +161,7 @@ def dataset_addresses(hdf_group, addresses='/', recursion_limit=100, get_size=No
     """
     Return list of addresses of datasets, starting at each address
     :param hdf_group: hdf5 File or Group object
-    :param addresses: list of str or str : start in this / these addresses
+    :param addresses: list of str or str : time_start in this / these addresses
     :param recursion_limit: Limit on recursivley checking lower groups
     :param get_size: None or int, if int, return only datasets with matching size
     :param get_ndim: None or int, if int, return only datasets with matching ndim
@@ -208,6 +209,45 @@ def find_name(name, address_list, match_case=False, whole_word=False):
     return out
 
 
+def find_cascade(name, address_list, exact_only=False):
+    """
+    Find dataset using field name in a cascading fashion:
+        1. Find exact match (matching case, whole_word)
+        2. any case, whole_word
+        3. any case, anywhere in address
+        4. Return None otherwise
+    :param name: str : name to match in dataset field name
+    :param address_list: list of str: list of str to search in
+    :param exact_only: return list of exact matches only (may be length 0)
+    :return: list of str addresses matching name
+    """
+    # fast return of full address
+    if address_list.count(name) == 1:
+        return [name]
+
+    if '/' in name:
+        # address, or part of address given.
+        # Addresses are unique but exact match not found, return closest match
+        return [address for address in address_list if address.lower().endswith(name.lower())]
+
+    # only match the address name
+    match_list = [address_name(address) for address in address_list]
+
+    # Exact match
+    exact_match = [address for idx, address in enumerate(address_list) if name == match_list[idx]]
+    if exact_match or exact_only:
+        return exact_match
+
+    # If not found, try matching lower case
+    lower_match = [address for idx, address in enumerate(address_list) if name.lower() == match_list[idx].lower()]
+    if lower_match:
+        return lower_match
+
+    # If not found, try matching any
+    any_match = [address for address in address_list if address.lower().endswith(name.lower())]
+    return any_match
+
+
 def tree(hdf_group, detail=False, recursion_limit=100):
     """
     Return str of the full tree of data in a hdf object
@@ -241,13 +281,14 @@ def tree(hdf_group, detail=False, recursion_limit=100):
 "----------------------ADDRESS DATASET FUNCTIONS------------------------------"
 
 
-def get_address(hdf_group, name, address_list=None, return_group=False):
+def get_address(hdf_group, name, address_list=None, exact_only=False, return_group=False):
     """
     Return address of dataset that most closely matches str name
      if multiple addresses match, take the longest array
     :param hdf_group: hdf5 File or Group object
     :param name: str or list of str of dataset address or name
     :param address_list: list of str of dataset addresses (None to generate from hdf_group)
+    :param exact_only: Bool, if True only searches for exact matches to name
     :param return_group: Bool if True returns the group address rather than dataset address
     :return: str address of best match or list of str address with same length as name list
     """
@@ -265,6 +306,11 @@ def get_address(hdf_group, name, address_list=None, return_group=False):
             continue
 
         # search tree
+        f_address = find_cascade(name, address_list, exact_only)
+        if not f_address:
+            addresses += [None]
+            continue
+        """
         f_address = find_name(name, address_list, match_case=True, whole_word=True)
         if len(f_address) == 0:
             f_address = find_name(name, address_list, match_case=False, whole_word=True)
@@ -273,6 +319,7 @@ def get_address(hdf_group, name, address_list=None, return_group=False):
         if len(f_address) == 0:
             addresses += [None]
             continue
+        """
 
         if return_group:
             f_address = address_group(f_address[0], name)
@@ -487,23 +534,23 @@ def image_data(hdf_group, index=None, address=None):
     if address is None:
         address = find_image(hdf_group)
     dataset = hdf_group.get(address)
+    if index is None:
+        index = len(dataset) // 2
     # if array - return array
     if len(dataset.shape) > 1:
         # array data
-        if index is None:
-            index = len(dataset) // 2
         return dataset[index]
     # if file - load file with imread, return array
-    else:
-        filepath = os.path.dirname(hdf_group.file.filename)
-        try:
-            filenames = [os.path.join(filepath, file) for file in dataset]
-        except TypeError:
-            # image_data filename is loaded in bytes format
-            filenames = [os.path.join(filepath, file.decode()) for file in dataset]
-        if index is None:
-            index = len(filenames) // 2
-        return imread(filenames[index])
+    filename = fn.bytestr2str(dataset[index])
+    try:
+        return imread(filename)
+    except FileNotFoundError:
+        pass
+    # filename maybe absolute, just take the final folder
+    abs_filepath = os.path.dirname(hdf_group.file.filename)
+    f = '/'.join(os.path.abspath(filename).replace('\\', '/').split('/')[-2:])
+    filename = os.path.join(abs_filepath, f)
+    return imread(filename)
 
 
 "----------------------------------------------------------------------------------------------------------------------"
@@ -539,9 +586,9 @@ class HdfScan(Scan):
         }
         alt_names = {
             # shortcut: name in namespace
-            'scanno': 'scan_number',
-            'cmd': 'scan_command',
-            'energy': 'en',
+            'scanno': ['scan_number'],
+            'cmd': ['scan_command'],
+            'energy': ['en'],
         }
         super().__init__(namespace, alt_names, **kwargs)
 
@@ -553,12 +600,13 @@ class HdfScan(Scan):
         """Reset the namespace"""
         self._namespace = {
             'filename': self.filename,
+            'filetitle': self.file,
             'scanno': self.scan_number
         }
 
     def __repr__(self):
         out = 'HdfScan(filename: %s, namespace: %d, associations: %d)'
-        return out % (self.filename, len(self._namespace), len(self._other2name))
+        return out % (self.filename, len(self._namespace), len(self._alt_names))
 
     def load(self):
         """Open and return hdf.File object"""
@@ -573,7 +621,7 @@ class HdfScan(Scan):
     def tree(self, group_address='/', detail=False, recursion_limit=100):
         """
         Return str of the full tree of data in a hdf object
-        :param group_address: str address of hdf group to start in
+        :param group_address: str address of hdf group to time_start in
         :param detail: False/ True - provide further information about each group and dataset, including attributes
         :param recursion_limit: int max number of levels
         :return: str
@@ -582,20 +630,20 @@ class HdfScan(Scan):
             out = tree(hdf[group_address], detail, recursion_limit)
         return out
 
-    def add2namespace(self, name, data=None, other_names=None, hdf_address=None):
+    def add2namespace(self, name, data=None, other_names=None, default_value=None, hdf_address=None):
         """
         set data in namespace
         :param name: str name
         :param data: any or None, data to store in namespace (nothing stored if None)
         :param other_names: str, list of str or None - strings to associate with name, giving the same result
+        :param default_value: any or None, data to store in default_value namespace (nothing stored if None)
         :param hdf_address: str address in hdf file
         :return: None
         """
-        super().add2namespace(name, data, other_names)
+        super().add2namespace(name, data, other_names, default_value)
         if hdf_address:
             self._hdf_name2address[name] = hdf_address
-            if 'debug' in self._options and 'namespace' in self._options['debug']:
-                print('Add hdf address: %s: %s' % (name, hdf_address))
+            self._debug('namespace', 'Add hdf address: %s: %s' % (name, hdf_address))
 
     def _dataset_addresses(self):
         """
@@ -612,36 +660,28 @@ class HdfScan(Scan):
     def _load_data(self, name):
         """
         Load data from hdf file
+          Overloads Scan._load_data to read hdf file
+          if 'name' not available, raises KeyError
         :param name: str name or address of data
-        :return: data
         """
         address_list = self._dataset_addresses()
         # find data address
         with load(self.filename) as hdf:
             address = get_address(hdf, name, address_list)
+            self._debug('hdf', 'Search hdf for %s, find: %s' % (name, address))
             if not address:
-                raise KeyError('\'%s\' not available in hdf file' % name)
+                if name in self._alt_names:
+                    for alt_name in self._alt_names[name]:
+                        # alt_names must find an exact match
+                        address = get_address(hdf, alt_name, address_list, exact_only=True)
+                        self._debug('hdf', 'Alt. Search hdf for %s, find: %s' % (alt_name, address))
+                        if address is not None: break
+                else:
+                    raise KeyError('\'%s\' not available in hdf file' % name)
             dataset = hdf.get(address)
             data = dataset_data(dataset)
         # Store for later use
-        self.add2namespace(name, data, address, address)
-        return data
-
-    def _get_data(self, name):
-        """
-        Get data from stored dicts
-         Overloads Scan._get_data to load data from hdf file
-        :param name: str, key or associated key in namespace
-        :return: data from namespace dict, or hdf file
-        """
-        if self._reload_mode:
-            return self._load_data(name)
-        try:
-            data = super()._get_data(name)
-        except KeyError:
-            # Attempt to load the data
-            data = self._load_data(name)
-        return data
+        self.add2namespace(name, data, address, hdf_address=address)
 
     def _find_defaults(self):
         """
@@ -660,8 +700,8 @@ class HdfScan(Scan):
             signal_data = dataset_data(signal_dataset)
             axes_name = address_name(axes_address)
             signal_name = address_name(signal_address)
-        self.add2namespace(axes_name, axes_data, self._axes_str, axes_address)
-        self.add2namespace(signal_name, signal_data, self._signal_str, signal_address)
+        self.add2namespace(axes_name, axes_data, self._axes_str, hdf_address=axes_address)
+        self.add2namespace(signal_name, signal_data, self._signal_str, hdf_address=signal_address)
         return axes_name, signal_name
 
     def address(self, name):
@@ -672,8 +712,8 @@ class HdfScan(Scan):
         """
         if name in self._hdf_name2address:
             return self._hdf_name2address[name]
-        if name in self._other2name and self._other2name[name] in self._hdf_name2address:
-            return self._hdf_name2address[self._other2name[name]]
+        if name in self._alt_names and self._alt_names[name] in self._hdf_name2address:
+            return self._hdf_name2address[self._alt_names[name]]
         self._load_data(name)
         return self._hdf_name2address[name]
 
@@ -721,3 +761,39 @@ class HdfScan(Scan):
         with load(self.filename) as hdf:
             image = image_data(hdf, index=idx, address=image_address)
         return image
+
+    def volume(self, image_address=None):
+        """
+        Load image from hdf file, works with either image addresses or stored arrays
+        :param image_address: str hdf address of image location
+        :return: LazyVolume or hdf dataset
+        """
+        if image_address:
+            self._image_name = image_address
+        elif self._image_name:
+            image_address = self._image_name
+        else:
+            image_address = self.find_image()
+            if not image_address:
+                raise KeyError('image path template not found in %r' % self)
+            self._image_name = image_address
+
+        with load(self.filename) as hdf:
+            dataset = hdf.get(image_address)
+
+            # if array - return array
+            if len(dataset.shape) > 1:
+                # array data
+                return dataset
+
+            # if file - load file with imread, return array
+            filenames = [fn.bytestr2str(file) for file in dataset]
+            try:
+                return LazyVolume(filenames)
+            except FileNotFoundError:
+                pass
+            # filename maybe absolute, just take the final folder
+            abs_filepath = os.path.dirname(self.filename)
+            f = ['/'.join(os.path.abspath(filename).replace('\\', '/').split('/')[-2:]) for filename in filenames]
+            filenames = [os.path.join(abs_filepath, file) for file in f]
+            return LazyVolume(filenames)

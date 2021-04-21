@@ -141,7 +141,7 @@ class NexusLoader:
     def addresses(self, address='/', recursion_limit=100, get_size=None, get_ndim=None):
         """
         Return list of addresses of datasets, starting at each group address
-        :param address: list of str or str : start in this / these addresses of hdf groups
+        :param address: list of str or str : time_start in this / these addresses of hdf groups
         :param recursion_limit: Limit on recursivley checking lower groups
         :param get_size: None or int, if int, return only datasets with matching size
         :param get_ndim: None or int, if int, return only datasets with matching ndim
@@ -260,7 +260,7 @@ class NexusLoader:
         """
         Returns location of hdf group with attribute ['NX_class']== nxclass
         :param nxclass: str name of class attribute
-        :param address: str address to start in
+        :param address: str address to time_start in
         :return: str address
         """
         with fn.load(self.filename) as hdf:
@@ -273,7 +273,7 @@ class NexusLoader:
         Returns location of hdf attribute
         Workds recursively - starts at the top level and searches all lower hdf groups
         :param attr: str : attribute name to search for
-        :param address: str address to start in
+        :param address: str address to time_start in
         :return: str hdf address
         """
         with fn.load(self.filename) as hdf:
@@ -300,7 +300,7 @@ class NexusLoader:
     def auto_xyaxis(self, address='/', cmd_string=None):
         """
         Find default axes, signal hdf addresses
-        :param address: str addtress to start in
+        :param address: str addtress to time_start in
         :param cmd_string: str of command to take x,y axis from as backup
         :return: xaxis_address, yaxis_address
         """
@@ -425,7 +425,7 @@ class NexusLoader:
           'nroi[n,m,h,v] - create a roi with cen_h, cen_v, wid_h, wid_v = n, m, h, v
 
         :param operation: str operation e.g. 'measurement/roi2_sum /Transmission'
-        :param address: str address to start in
+        :param address: str address to time_start in
         :return operation: str updated operation string with addresses converted to names
         :return data: dict of names and data
         """
@@ -471,7 +471,7 @@ class NexusLoader:
         out = self.string_operation(operation)
         out: 'the title is scan eta ...'
         :param operation: str with nexus dataset names in {brackets}
-        :param address: address of hdf group to start in
+        :param address: address of hdf group to time_start in
         :param shorten: bool if True, automatically shorten long floats
         :return: str
         """
