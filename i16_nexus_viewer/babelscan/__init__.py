@@ -80,7 +80,7 @@ Last updated: 22/04/21
 Version History:
 13/04/21 0.1.0  Version History started.
 16/04/21 0.2.0  Added instrument and other additions to Scan, changed container.py to folder_monitor.py
-22/04/21 0.3.0  Changed _get_data search path and added _default_values dict, added volume.dat
+22/04/21 0.3.0  Changed _get_data search path and added _default_values dict, added volume.py, settings.py
 """
 
 
@@ -88,24 +88,7 @@ __version__ = "0.3.0"
 __date__ = "22/04/2021"
 
 
-from .__settings__ import EVAL_MODE, PLOTTING_MODE
-
-
-def init_plot():
-    """Initialise plotting"""
-    if PLOTTING_MODE.lower() in ['matplotlib', 'pyplot']:
-        from . import plotting_matplotlib as pm
-        return pm
-    else:
-        raise ImportError('Matplotlib not in use')
-
-
-def init_peakfit():
-    """Initialise fitting"""
-    from .fitting import peakfit
-    return peakfit
-
-
+from .__settings__ import EVAL_MODE
 from .babelscan import Scan, MultiScan
 from .hdf import HdfScan
 from .dat import DatScan

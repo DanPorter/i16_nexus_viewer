@@ -7,6 +7,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D # 3D plotting
 
+from . import functions as fn
+
 
 DEFAULT_FONT = 'Times New Roman'
 FIG_SIZE = [8, 6]
@@ -271,3 +273,121 @@ def plot_3d_surface(axes, image, xdata=None, ydata=None, samples=None, clim=None
     axes.axis(axlim)
     return surface
 
+
+"----------------------------------------------------------------------------------------------------------------------"
+"----------------------------------------------- ScanPlotManager ------------------------------------------------------"
+"----------------------------------------------------------------------------------------------------------------------"
+
+
+class ScanPlotManager:
+    """
+    ScanPlotManager
+    :param scan: babelscan.Scan
+    """
+    def __init__(self, scan):
+        self.scan = scan
+
+    def __call__(self, *args, **kwargs):
+        return self.plot( *args, **kwargs)
+
+    def plotline(self, xaxis='axes', yaxis='signal', *args, **kwargs):
+        """
+        Plot scanned datasets on matplotlib axes subplot
+        :param xaxis: str name or address of array to plot on x axis
+        :param yaxis: str name or address of array to plot on y axis
+        :param args: given directly to plt.plot(..., *args, **kwars)
+        :param axes: matplotlib.axes subplot, or None to use plt.gca()
+        :param kwargs: given directly to plt.plot(..., *args, **kwars)
+        :return: list lines object, output of plot
+        """
+        xdata, ydata, yerror, xname, yname = self.scan.get_plot_data(xaxis, yaxis, None, None)
+
+        if 'label' not in kwargs:
+            kwargs['label'] = self.scan.label()
+        axes = kwargs['axes'] if 'axes' in kwargs else None
+        lines = plot_line(axes, xdata, ydata, None, *args, **kwargs)
+        return lines
+
+    def plot(self, xaxis='axes', yaxis='signal', *args, **kwargs):
+        """
+        Create matplotlib figure with plot of the scan
+        :param axes: matplotlib.axes subplot
+        :param xaxis: str name or address of array to plot on x axis
+        :param yaxis: str name or address of array to plot on y axis, also accepts list of names for multiplt plots
+        :param args: given directly to plt.plot(..., *args, **kwars)
+        :param axes: matplotlib.axes subplot, or None to create a figure
+        :param kwargs: given directly to plt.plot(..., *args, **kwars)
+        :return: axes object
+        """
+        # Check for multiple inputs on yaxis
+        ylist = fn.liststr(yaxis)
+
+        # Create figure
+        if 'axes' in kwargs:
+            axes = kwargs['axes']
+        else:
+            axes = create_axes(subplot=111)
+
+        xname, yname = xaxis, yaxis
+        for yaxis in ylist:
+            xdata, ydata, yerror, xname, yname = self.scan.get_plot_data(xaxis, yaxis, None, None)
+            plot_line(axes, xdata, ydata, None, *args, label=yname, **kwargs)
+
+        # Add labels
+        ttl = self.scan.title()
+        labels(ttl, xname, yname, legend=True)
+        return axes
+
+    def plot_image(self, index=None, xaxis='axes', axes=None, clim=None, cmap=None, colorbar=False, **kwargs):
+        """
+        Plot image in matplotlib figure (if available)
+        :param index: int, detector image index, 0-length of scan, if None, use centre index
+        :param xaxis: name or address of xaxis dataset
+        :param axes: matplotlib axes to plot on (None to create figure)
+        :param clim: [min, max] colormap cut-offs (None for auto)
+        :param cmap: str colormap name (None for auto)
+        :param colorbar: False/ True add colorbar to plot
+        :param kwargs: additinoal arguments for plot_detector_image
+        :return: axes object
+        """
+        # x axis data
+        print(self.scan)
+        xname, xdata = self.scan._name_eval(xaxis)
+
+        # image data
+        im = self.scan.image(index)
+        if index is None or index == 'sum':
+            xvalue = xdata[len(xdata) // 2]
+        else:
+            xvalue = xdata[index]
+
+        # Create figure
+        if axes is None:
+            axes = create_axes(subplot=111)
+        plot_detector_image(axes, im, **kwargs)
+
+        # labels
+        ttl = '%s\n%s [%s] = %s' % (self.scan.title(), xname, index, xvalue)
+        labels(ttl, colorbar=colorbar, colorbar_label='Detector', axes=axes)
+        colormap(clim, cmap, axes)
+        return axes
+
+
+"----------------------------------------------------------------------------------------------------------------------"
+"-------------------------------------------- MultiScanPlotManager ----------------------------------------------------"
+"----------------------------------------------------------------------------------------------------------------------"
+
+
+class MultiScanPlotManager:
+    """
+    ScanPlotManager
+    :param scan: babelscan.Scan
+    """
+    def __init__(self, scan):
+        self.scan = scan
+
+    def __call__(self, *args, **kwargs):
+        return self.plot( *args, **kwargs)
+
+    def plot(self, *args, **kwargs):
+        raise Exception("I haven't done it yet!")

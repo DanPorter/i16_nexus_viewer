@@ -642,7 +642,7 @@ class HdfScan(Scan):
             'cmd': ['scan_command'],
             'energy': ['en'],
         }
-        super().__init__(namespace, alt_names, **kwargs)
+        super(HdfScan, self).__init__(namespace, alt_names, **kwargs)
 
         self._label_str.extend(['scan_number', 'filetitle'])
         self._hdf_address_list = []
@@ -692,7 +692,7 @@ class HdfScan(Scan):
         :param hdf_address: str address in hdf file
         :return: None
         """
-        super().add2namespace(name, data, other_names, default_value)
+        super(HdfScan, self).add2namespace(name, data, other_names, default_value)
         if hdf_address:
             self._hdf_name2address[name] = hdf_address
             self._debug('namespace', 'Add hdf address: %s: %s' % (name, hdf_address))
@@ -800,29 +800,22 @@ class HdfScan(Scan):
         Load image from hdf file, works with either image addresses or stored arrays
         :param idx: int image number
         :param image_address: str hdf address of image location
-        :return: array
+        :return: numpy.array with ndim 2
         """
-        if image_address:
-            self._image_name = image_address
-        elif self._image_name:
-            image_address = self._image_name
-        else:
-            image_address = self.find_image()
-            if not image_address:
-                raise KeyError('image path template not found in %r' % self)
-            self._image_name = image_address
-        # Load image
-        with load(self.filename) as hdf:
-            image = image_data(hdf, index=idx, address=image_address)
-        return image
+        volume = self.volume(image_address)
+        if idx is None:
+            idx = len(volume) // 2
+        elif idx == 'sum':
+            return np.sum(volume, axis=0)
+        return volume[idx]
 
     def volume(self, image_address=None):
         """
         Load image from hdf file, works with either image addresses or stored arrays
         :param image_address: str hdf address of image location
-        :return: ImageVolume or hdf dataset
+        :return: ImageVolume or HdfVolume
         """
-        if self._volume:
+        if self._volume and image_address is None:
             return self._volume
         if image_address:
             self._image_name = image_address

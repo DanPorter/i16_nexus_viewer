@@ -36,7 +36,7 @@ Version History:
 """
 
 from .babelscan import file_loader, hdf_loader, FolderMonitor, Instrument
-from .babelscan import init_plot
+from .babelscan import plotting_matplotlib as pm  # Plotting functions
 from .beamlines import beamlines
 from . import functions_general as fg
 
@@ -47,9 +47,6 @@ __date__ = "20/04/2021"
 def experiment(data_folder, working_dir='.', **kwargs):
     return FolderMonitor(data_folder, working_dir, **kwargs)
 
-
-# Plotting functions
-pm = init_plot()
 
 # I16 Instrument
 i16 = beamlines['i16']

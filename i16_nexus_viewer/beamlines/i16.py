@@ -2,11 +2,12 @@
 I16 Parameter file
 """
 
+import json
 import numpy as np
 from i16_nexus_viewer.babelscan import Instrument
 
 file_format = '%06d.nxs'
-error_function = lambda x: np.mean(x + 0.1)
+def error_function(x): return np.mean(x + 0.1)
 
 
 # Names of datasets that will appear on print(scan)
@@ -79,6 +80,17 @@ default_values = {
     'gamma': 0,
     'atest': 'itworks!'
 }
+
+config_file = {
+    'name': 'i16',
+    'default_names': default_names,
+    'formats': default_formats,
+    'default_values': default_values,
+    'options': options
+}
+
+#with open('i16.config', 'w') as f:
+#    json.dump(config_file, f, sort_keys=True, indent=4)
 
 i16 = Instrument(
     name='i16',

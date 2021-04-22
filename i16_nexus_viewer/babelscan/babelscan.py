@@ -5,7 +5,7 @@ babelscan object for holding many types of scan data
 import numpy as np
 from . import functions as fn
 from . import EVAL_MODE
-from . import init_plot, init_peakfit
+from .settings import init_scan_plot_manager, init_multiscan_plot_manager, init_scan_fit_manager
 from .volume import ArrayVolume
 
 
@@ -121,6 +121,11 @@ class Scan:
         if default_values is not None:
             self._default_values.update(default_values)
 
+        # Managers
+        self.plot = init_scan_plot_manager(self)
+        self.fit = init_scan_fit_manager(self)
+
+        # Options and defaults
         self._options = {}
         self._label_str = ['label']
         self._title_str = ['title', 'filename']
@@ -232,6 +237,10 @@ class Scan:
             self._image_name = fn.liststr(kwargs['image_name'])
         if 'str_list' in kwargs:
             self._print_list = fn.liststr(kwargs['str_list'])
+        if 'scan_plot_manager' in kwargs:
+            self.plot = kwargs['scan_plot_manager'](self)
+        if 'scan_fit_manager' in kwargs:
+            self.fit = kwargs['scan_fit_manager'](self)
 
     def _debug(self, debug_name, message):
         """
@@ -782,6 +791,38 @@ class Scan:
         yname, ydata, yerror = self._get_signal_operation(yname, signal_op, error_op)
         return xdata, ydata, yerror, xname, yname
 
+    def save_plot_data(self, filename=None, xname=None, yname=None, signal_op=None, error_op=None):
+        """
+        Return xdata, ydata, yerror, xname, yname
+         x, y, dy, xlabel, ylabel = scan.get_plot_data('axes', 'signal', '/Transmission', np.sqrt)
+
+        :param filename: str filename to save data to
+        :param xname: str name of value to use as x-axis
+        :param yname: str name of value to use as y-axis
+        :param signal_op: operation to perform on yaxis, e.g. '/Transmission'
+        :param error_op: function to use on yaxis to generate error, e.g. np.sqrt
+        :return xdata: array
+        :return ydata: array
+        :return yerror: array
+        :return xname: str
+        :return yname: str
+        """
+        xdata, ydata, yerror, xlabel, ylabel = self.get_plot_data(xname, yname, signal_op, error_op)
+
+        if filename is None:
+            filename = 'Scan_%s_%s_%s.csv' % (self.label(), xname, yname)
+
+        with open(filename, 'wt') as f:
+            f.write('# %r\n' % self)
+            title = '\n# '.join(self.title().split('\n'))
+            f.write('# %s\n' % title)
+            labels = ','.join([xlabel, ylabel, 'error'])
+            f.write('# %s\n' % labels)
+            for x, y, e in zip(xdata, ydata, yerror):
+                f.write('%s, %s, %s\n' % (x, y, e))
+        print('(%s, %s, error) written to %s' % (xlabel, ylabel, filename))
+
+
     "------------------------------- images -------------------------------------------"
 
     def image(self, idx):
@@ -870,142 +911,6 @@ class Scan:
         self.add2namespace(name, other_names=operation)
         return roi_sum, roi_max
 
-    "------------------------------- fitting -------------------------------------------"
-
-    def fit(self, xaxis='axes', yaxis='signal', fit_type=None, print_result=True, plot_result=False):
-        """
-        Automatic fitting of scan
-
-        Use LMFit
-        Pass fit_type = LMFit model
-        return LMFit output
-        """
-        peakfit = init_peakfit()
-        xdata, ydata, yerror, xname, yname = self.get_plot_data(xaxis, yaxis, None, None)
-
-        # lmfit
-        out = peakfit(xdata, ydata, yerror)
-
-        self.add2namespace('lmfit', out, 'fit_result')
-        fit_dict = {}
-        for pname, param in out.params.items():
-            ename = 'stderr_' + pname
-            fit_dict[pname] = param.value
-            fit_dict[ename] = param.stderr
-        self._namespace.update(fit_dict)
-        self.add2namespace('fit', out.best_fit, other_names=['fit_%s' % yname])
-
-        if print_result:
-            print(self.title())
-            print(out.fit_report())
-        if plot_result:
-            fig, grid = out.plot()
-            # plt.suptitle(self.title(), fontsize=12)
-            # plt.subplots_adjust(top=0.85, left=0.15)
-            ax1, ax2 = fig.axes
-            ax2.set_xlabel(xname)
-            ax2.set_ylabel(yname)
-        return out
-
-    def fit_result(self, parameter_name=None):
-        """
-        Returns parameter, error from the last run fit
-        :param parameter_name: str, name from last fit e.g. 'amplitude', or None to return lmfit object
-        :param
-        :return:
-        """
-        if 'lmfit' not in self._namespace:
-            self.fit()
-        lmfit = self._get_data('lmfit')
-        if parameter_name is None:
-            return lmfit
-        param = lmfit.params[parameter_name]
-        return param.value, param.stderr
-
-    "------------------------------- plotting -------------------------------------------"
-
-    def plotline(self, xaxis='axes', yaxis='signal', *args, **kwargs):
-        """
-        Plot scanned datasets on matplotlib axes subplot
-        :param xaxis: str name or address of array to plot on x axis
-        :param yaxis: str name or address of array to plot on y axis
-        :param args: given directly to plt.plot(..., *args, **kwars)
-        :param axes: matplotlib.axes subplot, or None to use plt.gca()
-        :param kwargs: given directly to plt.plot(..., *args, **kwars)
-        :return: list lines object, output of plot
-        """
-        pm = init_plot()
-        xdata, ydata, yerror, xname, yname = self.get_plot_data(xaxis, yaxis, None, None)
-
-        if 'label' not in kwargs:
-            kwargs['label'] = self.label()
-        axes = kwargs['axes'] if 'axes' in kwargs else None
-        lines = pm.plot_line(axes, xdata, ydata, None, *args, **kwargs)
-        return lines
-
-    def plot(self, xaxis='axes', yaxis='signal', *args, **kwargs):
-        """
-        Create matplotlib figure with plot of the scan
-        :param axes: matplotlib.axes subplot
-        :param xaxis: str name or address of array to plot on x axis
-        :param yaxis: str name or address of array to plot on y axis, also accepts list of names for multiplt plots
-        :param args: given directly to plt.plot(..., *args, **kwars)
-        :param axes: matplotlib.axes subplot, or None to create a figure
-        :param kwargs: given directly to plt.plot(..., *args, **kwars)
-        :return: axes object
-        """
-        pm = init_plot()
-        # Check for multiple inputs on yaxis
-        ylist = fn.liststr(yaxis)
-
-        # Create figure
-        if 'axes' in kwargs:
-            axes = kwargs['axes']
-        else:
-            axes = pm.create_axes(subplot=111)
-
-        xname, yname = xaxis, yaxis
-        for yaxis in ylist:
-            xdata, ydata, yerror, xname, yname = self.get_plot_data(xaxis, yaxis, None, None)
-            pm.plot_line(axes, xdata, ydata, None, *args, label=yname, **kwargs)
-
-        # Add labels
-        ttl = self.title()
-        pm.labels(ttl, xname, yname, legend=True)
-        return axes
-
-    def plot_image(self, index=None, xaxis='axes', axes=None, clim=None, cmap=None, colorbar=False, **kwargs):
-        """
-        Plot image in matplotlib figure (if available)
-        :param index: int, detector image index, 0-length of scan, if None, use centre index
-        :param xaxis: name or address of xaxis dataset
-        :param axes: matplotlib axes to plot on (None to create figure)
-        :param clim: [min, max] colormap cut-offs (None for auto)
-        :param cmap: str colormap name (None for auto)
-        :param colorbar: False/ True add colorbar to plot
-        :param kwargs: additinoal arguments for plot_detector_image
-        :return: axes object
-        """
-        pm = init_plot()
-        # x axis data
-        xname, xdata = self._get_name_data(xaxis)
-
-        # image data
-        if index is None:
-            index = len(xdata) // 2
-        im = self.image(index)
-
-        # Create figure
-        if axes is None:
-            axes = pm.create_axes(subplot=111)
-        pm.plot_detector_image(axes, im, **kwargs)
-
-        # labels
-        ttl = '%s\n%s [%d] = %s' % (self.title(), xname, index, xdata[index])
-        pm.labels(ttl, colorbar=colorbar, colorbar_label='Detector', axes=axes)
-        pm.colormap(clim, cmap, axes)
-        return axes
-
 
 "----------------------------------------------------------------------------------------------------------------------"
 "----------------------------------------------- MultiScan ------------------------------------------------------------"
@@ -1028,6 +933,9 @@ class MultiScan:
             self._variables = []
         else:
             self._variables = list(np.asarray(variables, dtype=str).reshape(-1))
+
+        # Managers
+        self.plot = init_multiscan_plot_manager(self)
 
     def __repr__(self):
         return 'MultiScan(%d items)' % len(self._scan_list)

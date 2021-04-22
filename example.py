@@ -42,3 +42,6 @@ scan.fit('axes', 'nroi_peak[31, 31]')
 scan.plot('axes', ['nroi_peak[31, 31]', 'fit'])
 print(scan.string('amplitude'))
 
+scan.plot.plot_image('sum', clim=[0, 100])
+
+

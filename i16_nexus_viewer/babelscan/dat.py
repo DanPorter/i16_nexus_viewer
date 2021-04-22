@@ -4,7 +4,6 @@ Functions for reading .dat files
 
 import os
 import numpy as np
-from imageio import imread  # read Tiff images
 from collections import OrderedDict
 
 from . import functions as fn
@@ -21,7 +20,7 @@ class Dict2Obj(OrderedDict):
     """
 
     def __init__(self, dictvals, order=None):
-        super().__init__()
+        super(Dict2Obj, self).__init__()
 
         if order is None:
             order = dictvals.keys()
@@ -120,7 +119,7 @@ class DatScan(Scan):
             'scan_command': ['cmd'],
             'energy': ['en'],
         }
-        super().__init__(namespace, alt_names, **kwargs)
+        super(DatScan, self).__init__(namespace, alt_names, **kwargs)
         self._label_str.extend(['scanno', 'filetitle'])
 
     def reset(self):
@@ -155,19 +154,15 @@ class DatScan(Scan):
     def image(self, idx=None):
         """
         Load image from dat file image path tempate
-        :param idx: int image number
-        :return:
+        :param idx: int image number or 'sum'
+        :return: numpy.array with ndim 2
         """
-        path_spec = self._get_data("_path_template")  # image folder path tempalte e.g. folder/%d.tiff
-        pointers = self._get_data('path')  # list of image numbers in dat files
+        volume = self.volume()
         if idx is None:
-            idx = len(pointers) // 2
-        image_pointer = path_spec % pointers[idx]
-        # add dat file path
-        abs_filepath = os.path.dirname(self.filename)
-        f = '/'.join(os.path.abspath(image_pointer).replace('\\', '/').split('/')[-2:])
-        filename = os.path.join(abs_filepath, f)
-        return imread(filename)
+            idx = len(volume) // 2
+        elif idx == 'sum':
+            return np.sum(volume, axis=0)
+        return volume[idx]
 
     def volume(self):
         """

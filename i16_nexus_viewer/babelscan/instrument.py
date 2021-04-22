@@ -3,7 +3,30 @@ Define Instrument class
  An instrument is a generator of Scans and FolderMonitors (experiements) with specific default settings
 """
 
+import json
 from . import file_loader, FolderMonitor
+
+
+def instrument_from_config(config_file):
+    """
+    Create Instrument class from instrument.config file.
+      .config files should be json files with the following keys:
+        'name': str
+        'default_names': dict,
+        'formats': dict,
+        'default_values': dict,
+        'options': dict
+    :param config_file: str config filename
+    :return: Instrument
+    """
+    with open(config_file, 'r') as fp:
+        config = json.load(fp)
+    name = config['name']
+    default_names = config['default_names']
+    formats = config['formats']
+    default_values = config['default_values']
+    options = config['options']
+    return Instrument(name, default_names, formats, default_values, options)
 
 
 class Instrument:
@@ -17,8 +40,7 @@ class Instrument:
     :param formats: dict :
     :param options: dict :
     """
-    def __init__(self, name, default_names=None, formats=None, default_values=None,
-                 options=None, filename_format=None):
+    def __init__(self, name, default_names=None, formats=None, default_values=None, options=None):
         self.name = name
         self._default_names = {} if default_names is None else default_names
         self._formats = {} if formats is None else formats
