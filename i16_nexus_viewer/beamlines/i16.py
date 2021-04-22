@@ -16,6 +16,7 @@ str_list = ['scan_number', 'filename', 'scan_command', 'axes', 'signal',
 
 # These will be added as **kwargs in each scan
 options = {
+    'filename_format': file_format,
     'label_command': '#{scan_number:1.0f}',
     'title_command': '{FolderTitle} #{scan_number} {i16_energy} {i16_temperature} {i16_hkl}\n{scan_command}\n'
                      'ss = {ss}, ds = {ds}',
@@ -34,7 +35,7 @@ options = {
 # these will be added to alternative_names dict
 default_names = {
     # name in namespace or hdf address: [shortcuts],
-    'incident_energy': ['en', 'Energy', 'energy'],
+    'en': ['incident_energy', 'Energy', 'energy'],
     'Ta': ['Temperature', 'temp'],
     'Tb': ['Temperature', 'temp'],
     'Tgas': ['Temperature', 'temp'],
@@ -84,6 +85,5 @@ i16 = Instrument(
     default_names=default_names,
     formats=default_formats,
     default_values=default_values,
-    options=options,
-    filename_format=file_format
+    options=options
 )
