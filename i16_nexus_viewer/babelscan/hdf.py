@@ -11,7 +11,7 @@ from imageio import imread  # read Tiff images
 
 from . import functions as fn
 from .babelscan import Scan
-from .lazyvolume import LazyVolume
+from .volume import ImageVolume, DatasetVolume
 
 
 "----------------------------LOAD FUNCTIONS---------------------------------"
@@ -554,6 +554,58 @@ def image_data(hdf_group, index=None, address=None):
 
 
 "----------------------------------------------------------------------------------------------------------------------"
+"---------------------------------------------- HdfWrapper ------------------------------------------------------------"
+"----------------------------------------------------------------------------------------------------------------------"
+
+
+class HdfWrapper(h5py.File):
+    """
+    Implementation of h5py.File, with additional functions
+    nx = Hdf5Nexus('/data/12345.nxs')
+
+    Additional functions:
+        nx.nx_dataset_addresses() - list of all hdf addresses for datasets
+        nx.nx_tree_str() - string of internal data structure
+        nx.nx_find_name('eta') - returns hdf address
+        nx.nx_find_addresses( addresses=['/']) - returns list of addresses
+        nx.nx_find_attr(attr='signal') - returns address with attribute
+        nx.nx_find_image() - returns address of image data
+        nx.nx_getdata(address) - returns numpy array of data at address
+        nx.nx_array_data(n_points, addresses) - returns dict of n length arrays and dict of addresses
+        nx.nx_value_data(addresses) - returns dict of values and dict of addresses
+        nx.nx_str_data(addresses, format) - returns dict of string output and dict of addresses
+        nx.nx_image_data(index, all) - returns 2/3D array of image data
+    """
+    def __init__(self, filename, mode='r', *args, **kwargs):
+        super(HdfWrapper, self).__init__(filename, mode, *args, **kwargs)
+
+    def nx_reload(self):
+        """Closes the hdf file and re-opens"""
+        filename = self.filename
+        self.close()
+        self.__init__(filename)
+
+    def tree(self, address='/', detail=False):
+        return tree(self.get(address), detail=detail)
+
+    def all_addresses(self):
+        return dataset_addresses(self.get('/'))
+
+    def find(self, name, match_case=True, whole_word=True):
+        address_list = self.all_addresses()
+        return find_name(name, address_list, match_case, whole_word)
+
+    def find_image(self):
+        return find_image(self.get('/'), multiple=True)
+
+    def find_attr(self, attr):
+        return find_attr(self.get('/'), attr)
+
+    def find_nxclass(self, nx_class):
+        return find_nxclass(self.get('/'), nx_class)
+
+
+"----------------------------------------------------------------------------------------------------------------------"
 "---------------------------------------------- HdfScan -------------------------------------------------------------"
 "----------------------------------------------------------------------------------------------------------------------"
 
@@ -712,8 +764,10 @@ class HdfScan(Scan):
         """
         if name in self._hdf_name2address:
             return self._hdf_name2address[name]
-        if name in self._alt_names and self._alt_names[name] in self._hdf_name2address:
-            return self._hdf_name2address[self._alt_names[name]]
+        if name in self._alt_names:
+            for alt_name in self._alt_names[name]:
+                if alt_name in self._hdf_name2address:
+                    return self._hdf_name2address[alt_name]
         self._load_data(name)
         return self._hdf_name2address[name]
 
@@ -766,8 +820,10 @@ class HdfScan(Scan):
         """
         Load image from hdf file, works with either image addresses or stored arrays
         :param image_address: str hdf address of image location
-        :return: LazyVolume or hdf dataset
+        :return: ImageVolume or hdf dataset
         """
+        if self._volume:
+            return self._volume
         if image_address:
             self._image_name = image_address
         elif self._image_name:
@@ -784,16 +840,19 @@ class HdfScan(Scan):
             # if array - return array
             if len(dataset.shape) > 1:
                 # array data
-                return dataset
+                self._volume = DatasetVolume(dataset)
+                return self._volume
 
             # if file - load file with imread, return array
             filenames = [fn.bytestr2str(file) for file in dataset]
-            try:
-                return LazyVolume(filenames)
-            except FileNotFoundError:
-                pass
-            # filename maybe absolute, just take the final folder
-            abs_filepath = os.path.dirname(self.filename)
-            f = ['/'.join(os.path.abspath(filename).replace('\\', '/').split('/')[-2:]) for filename in filenames]
-            filenames = [os.path.join(abs_filepath, file) for file in f]
-            return LazyVolume(filenames)
+
+        try:
+            return ImageVolume(filenames)
+        except FileNotFoundError:
+            pass
+        # filename maybe absolute, just take the final folder
+        abs_filepath = os.path.dirname(self.filename)
+        f = ['/'.join(os.path.abspath(filename).replace('\\', '/').split('/')[-2:]) for filename in filenames]
+        filenames = [os.path.join(abs_filepath, file) for file in f]
+        self._volume = ImageVolume(filenames)
+        return self._volume

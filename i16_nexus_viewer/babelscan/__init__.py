@@ -75,17 +75,17 @@ Diamond
 2021
 
 Version 0.3.0
-Last updated: 20/04/21
+Last updated: 22/04/21
 
 Version History:
 13/04/21 0.1.0  Version History started.
 16/04/21 0.2.0  Added instrument and other additions to Scan, changed container.py to folder_monitor.py
-20/04/21 0.3.0  Changed _get_data search path and added _default_values dict
+22/04/21 0.3.0  Changed _get_data search path and added _default_values dict, added volume.dat
 """
 
 
 __version__ = "0.3.0"
-__date__ = "20/04/2021"
+__date__ = "22/04/2021"
 
 
 from .__settings__ import EVAL_MODE, PLOTTING_MODE
@@ -110,5 +110,5 @@ from .babelscan import Scan, MultiScan
 from .hdf import HdfScan
 from .dat import DatScan
 from .csv import CsvScan
-from .folder_monitor import create_scan, file_loader, load_files, FolderMonitor
+from .folder_monitor import create_scan, file_loader, hdf_loader, load_files, FolderMonitor
 from .instrument import Instrument

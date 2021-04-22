@@ -6,6 +6,7 @@ import numpy as np
 from . import functions as fn
 from . import EVAL_MODE
 from . import init_plot, init_peakfit
+from .volume import ArrayVolume
 
 
 "----------------------------------------------------------------------------------------------------------------------"
@@ -134,6 +135,7 @@ class Scan:
         self._print_list = ['scan_command', 'axes', 'signal']
         self._reload_mode = False
         self._set_options(**kwargs)
+        self._volume = None
 
         self._debug('init', '%r' % self)
 
@@ -791,6 +793,16 @@ class Scan:
         """
         return np.zeros([100, 100])
 
+    def volume(self):
+        """
+        Rerturn volume
+        :return:
+        """
+        if self._volume is None:
+            vol = np.array([self.image(idx) for idx in range(self.scan_length())])
+            self._volume = ArrayVolume(vol)
+        return self._volume
+
     def image_size(self):
         """
         Returns the image size
@@ -812,19 +824,7 @@ class Scan:
         :param wid_v:  int or None
         :return: l*v*h array
         """
-        shape = self.image_size()
-        scan_length = len(self.axes())
-
-        if cen_h is None:
-            cen_h = shape[1] // 2
-        if cen_v is None:
-            cen_v = shape[0] // 2
-
-        roi = np.zeros([scan_length, wid_v, wid_h])
-        for n in range(scan_length):
-            image = self.image(n)
-            roi[n] = image[cen_v - wid_v // 2:cen_v + wid_v // 2, cen_h - wid_h // 2:cen_h + wid_h // 2]
-        return roi
+        return self.volume().roi(cen_h, cen_v, wid_h, wid_v)
 
     def image_roi_sum(self, cen_h=None, cen_v=None, wid_h=31, wid_v=31):
         """
@@ -835,21 +835,8 @@ class Scan:
         :param wid_v:  int or None
         :return: roi_sum, roi_max
         """
-        shape = self.image_size()
-        scan_length = len(self.axes())
-
-        if cen_h is None:
-            cen_h = shape[1] // 2
-        if cen_v is None:
-            cen_v = shape[0] // 2
-
-        roi_sum = np.zeros(scan_length)
-        roi_max = np.zeros(scan_length)
-        for n in range(scan_length):
-            image = self.image(n)
-            roi = image[cen_v - wid_v // 2:cen_v + wid_v // 2, cen_h - wid_h // 2:cen_h + wid_h // 2]
-            roi_sum[n] = np.sum(roi)
-            roi_max[n] = np.max(roi)
+        volume = self.volume()
+        roi_sum, roi_max = volume.roi_sum(cen_h, cen_v, wid_h, wid_v)
         # Add to namespace
         n = 1
         while 'nroi%d_sum' % n in self._namespace:
@@ -870,16 +857,8 @@ class Scan:
         :param operation: str : operation string
         :return: sum, maxval : [o] length arrays
         """
-        vals = [int(val) for val in fn.re.findall(r'\d+', operation)]
-        nvals = len(vals)
-        if nvals == 4:
-            cen_h, cen_v, wid_h, wid_v = vals
-        elif nvals == 2:
-            cen_h, cen_v = None, None
-            wid_h, wid_v = vals
-        else:
-            cen_h, cen_v = None, None
-            wid_h, wid_v = 31, 31
+        volume = self.volume()
+        cen_h, cen_v, wid_h, wid_v, _ = volume.check_roi_op(operation)
         roi_sum, roi_max = self.image_roi_sum(cen_h, cen_v, wid_h, wid_v)
         # Add operation to associated namespace
         n = 1
@@ -914,7 +893,7 @@ class Scan:
             fit_dict[pname] = param.value
             fit_dict[ename] = param.stderr
         self._namespace.update(fit_dict)
-        self.add2namespace('fit_%s' % yname, out.best_fit, other_names=['fit'])
+        self.add2namespace('fit', out.best_fit, other_names=['fit_%s' % yname])
 
         if print_result:
             print(self.title())
@@ -969,7 +948,7 @@ class Scan:
         Create matplotlib figure with plot of the scan
         :param axes: matplotlib.axes subplot
         :param xaxis: str name or address of array to plot on x axis
-        :param yaxis: str name or address of array to plot on y axis
+        :param yaxis: str name or address of array to plot on y axis, also accepts list of names for multiplt plots
         :param args: given directly to plt.plot(..., *args, **kwars)
         :param axes: matplotlib.axes subplot, or None to create a figure
         :param kwargs: given directly to plt.plot(..., *args, **kwars)
@@ -977,7 +956,7 @@ class Scan:
         """
         pm = init_plot()
         # Check for multiple inputs on yaxis
-        ylist = np.asarray(yaxis, dtype=str).reshape(-1)
+        ylist = fn.liststr(yaxis)
 
         # Create figure
         if 'axes' in kwargs:
@@ -985,17 +964,19 @@ class Scan:
         else:
             axes = pm.create_axes(subplot=111)
 
-        xdata, ydata, yerror, xname, yname = self.get_plot_data(xaxis, yaxis, None, None)
-        pm.plot_line(axes, xdata, ydata, None, *args, label=yname, **kwargs)
+        xname, yname = xaxis, yaxis
+        for yaxis in ylist:
+            xdata, ydata, yerror, xname, yname = self.get_plot_data(xaxis, yaxis, None, None)
+            pm.plot_line(axes, xdata, ydata, None, *args, label=yname, **kwargs)
 
         # Add labels
         ttl = self.title()
         pm.labels(ttl, xname, yname, legend=True)
         return axes
 
-    def plot_detector(self, index=None, xaxis='axes', axes=None, clim=None, cmap=None, colorbar=False, **kwargs):
+    def plot_image(self, index=None, xaxis='axes', axes=None, clim=None, cmap=None, colorbar=False, **kwargs):
         """
-        Plot detector image in matplotlib figure
+        Plot image in matplotlib figure (if available)
         :param index: int, detector image index, 0-length of scan, if None, use centre index
         :param xaxis: name or address of xaxis dataset
         :param axes: matplotlib axes to plot on (None to create figure)

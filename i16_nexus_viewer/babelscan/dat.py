@@ -2,13 +2,14 @@
 Functions for reading .dat files
 """
 
+import os
 import numpy as np
 from imageio import imread  # read Tiff images
 from collections import OrderedDict
 
 from . import functions as fn
 from .babelscan import Scan
-from .lazyvolume import LazyVolume
+from .volume import ImageVolume
 
 
 "----------------------------LOAD FUNCTIONS---------------------------------"
@@ -121,7 +122,6 @@ class DatScan(Scan):
         }
         super().__init__(namespace, alt_names, **kwargs)
         self._label_str.extend(['scanno', 'filetitle'])
-        self.dat = self._load_data()
 
     def reset(self):
         """Reset the namespace"""
@@ -158,35 +158,32 @@ class DatScan(Scan):
         :param idx: int image number
         :return:
         """
-        if self._image_name:
-            image_name = self._image_name
-        else:
-            try:
-                image_name = [s for s in self._namespace.keys() if "_path_template" in s][0]
-                self._image_name = image_name
-            except IndexError:
-                raise KeyError('image path template not found in %r' % self)
+        path_spec = self._get_data("_path_template")  # image folder path tempalte e.g. folder/%d.tiff
         pointers = self._get_data('path')  # list of image numbers in dat files
         if idx is None:
-            idx = len(pointers)
-        image_pointer = self._namespace[image_name] % pointers[idx]
-        return imread(image_pointer)
+            idx = len(pointers) // 2
+        image_pointer = path_spec % pointers[idx]
+        # add dat file path
+        abs_filepath = os.path.dirname(self.filename)
+        f = '/'.join(os.path.abspath(image_pointer).replace('\\', '/').split('/')[-2:])
+        filename = os.path.join(abs_filepath, f)
+        return imread(filename)
 
     def volume(self):
         """
-        Load image as LazyVolume
-        :return: LazyVolume
+        Load image as ImageVolume
+        :return: ImageVolume
         """
-        if self._image_name:
-            image_name = self._image_name
-        else:
-            try:
-                image_name = [s for s in self._namespace.keys() if "_path_template" in s][0]
-                self._image_name = image_name
-            except IndexError:
-                raise KeyError('image path template not found in %r' % self)
+        if self._volume:
+            return self._volume
+        path_spec = self._get_data("_path_template")  # image folder path tempalte e.g. folder/%d.tiff
         pointers = self._get_data('path')  # list of image numbers in dat files
-        path_spec = self._namespace[image_name]
-        filenames = [path_spec % pointer for pointer in pointers]
-        return LazyVolume(filenames)
 
+        # add dat file path
+        abs_filepath = os.path.dirname(self.filename)
+        f = '/'.join(os.path.abspath(path_spec).replace('\\', '/').split('/')[-2:])
+        path_spec = os.path.join(abs_filepath, f)
+
+        filenames = [path_spec % pointer for pointer in pointers]
+        self._volume = ImageVolume(filenames)
+        return self._volume

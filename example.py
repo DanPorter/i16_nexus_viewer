@@ -28,7 +28,8 @@ exp = nv.i16.experiment([datadir0, datadir])
 scan = exp(877619)  # merlin
 
 print(scan('eta'))
-scan.plot('axes', 'nroi[31, 31]')
-scan.fit('axes', 'nroi[31, 31]', plot_result=True)
+scan.fit('axes', 'nroi[31, 31]')
+scan.plot('axes', ['nroi[31, 31]', 'fit'])
+print(scan.string('amplitude'))
 
 

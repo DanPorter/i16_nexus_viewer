@@ -8,7 +8,7 @@ import numpy as np
 
 from . import functions as fn
 from .babelscan import Scan, MultiScan
-from .hdf import HdfScan
+from .hdf import HdfScan, HdfWrapper
 from .dat import DatScan
 from .csv import CsvScan
 
@@ -41,6 +41,15 @@ def file_loader(filename, **kwargs):
         return CsvScan(filename, **kwargs)
     else:
         return HdfScan(filename, **kwargs)
+
+
+def hdf_loader(filename):
+    """
+    Load hdf (nexus) file as enhanced h5py object with additional functions
+    :param filename: .hdf, .nxs
+    :return: HdfWrapper (subclass of h5py.File)
+    """
+    return HdfWrapper(filename)
 
 
 def load_files(filenames, variables=None, **kwargs):

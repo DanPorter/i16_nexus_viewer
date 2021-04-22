@@ -35,7 +35,7 @@ Version History:
 20/04/21 0.6.1  Updates to babelscan, alternative names and default values added
 """
 
-from .babelscan import file_loader, FolderMonitor, Instrument
+from .babelscan import file_loader, hdf_loader, FolderMonitor, Instrument
 from .babelscan import init_plot
 from .beamlines import beamlines
 from . import functions_general as fg
